@@ -32,7 +32,7 @@ jobs:
           build-args: |
             github_username=${{ secrets.USERNAME }}
             github_token=${{ secrets.TOKEN }}
-          tags: uugai/hub-pipeline-Classifier:latest
+          tags: uugai/hub-pipeline-classifier:latest
       - name: Build and push Docker image with release tag
         uses: docker/build-push-action@v2
         if: github.event.inputs.tag != 'test'
@@ -42,7 +42,7 @@ jobs:
           build-args: |
             github_username=${{ secrets.USERNAME }}
             github_token=${{ secrets.TOKEN }}
-          tags: uugai/hub-pipeline-Classifier:${{ github.event.inputs.tag || github.ref_name }}
+          tags: uugai/hub-pipeline-classifier:${{ github.event.inputs.tag || github.ref_name }}
       # After we build the Docker image, we create a pull request to update the GitOps repository
       # This will allow us to update the Helm chart with the new Docker image tag.
       - name: Create GitOps Pull Request
