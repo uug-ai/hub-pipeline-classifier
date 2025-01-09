@@ -140,7 +140,7 @@ class RabbitMQ(MessageBroker):
         # Check if connection to RabbitMQ is open, if not, reconnect
         if not self.connection.is_open:
             print("Connection to RabbitMQ is not open")
-            self.Connect()
+            self.connect()
 
         # Check if readChannel is closed, if yes, reinitialize
         if self.readChannel.is_closed:
@@ -177,7 +177,7 @@ class RabbitMQ(MessageBroker):
         # Handle connection and channel closure exceptions
         except pika.exceptions.ConnectionClosed:
             print('Reconnecting to queue')
-            self.Connect()
+            self.connect()
             self.publishChannel.basic_publish(
                 exchange=self.exchange, routing_key=self.target_queue_name, body=message)
         except pika.exceptions.ChannelClosed:
