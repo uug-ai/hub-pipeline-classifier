@@ -1,6 +1,6 @@
 # Object Classification Utilising YoloV8
 
-The repository includes all the scripts necessary for object classification, utilizing [`yoloV8`](https://yolov8.com) for [object detection](https://docs.ultralytics.com/tasks/detect/), [segmentation](https://docs.ultralytics.com/tasks/segment/), and [classification](https://docs.ultralytics.com/tasks/classify/). It integrates with [`RabbitMQ`](https://www.rabbitmq.com) to receive messages and retrieves media from the [`Kerberos Vault`](https://kerberos.io/product/vault/) based on the message details. Upon receiving the video, objects are detected, segmented, and classified, while the primary colors of the objects are simultaneously calculated. The frame is annotated with this information and can be saved locally. Additionally, the results are stored in a JSON object. More features are available and will be detailed in a subsequent paragraph.
+The repository includes all the scripts necessary for object classification, utilizing [`YoloV8`](https://yolov8.com) for [object detection](https://docs.ultralytics.com/tasks/detect/), [segmentation](https://docs.ultralytics.com/tasks/segment/), and [classification](https://docs.ultralytics.com/tasks/classify/). It integrates with [`RabbitMQ`](https://www.rabbitmq.com) to receive messages and retrieves media from [`Vault`](https://kerberos.io/product/vault/) based on the message details. Upon receiving the video, objects are detected, segmented, and classified, while the primary colors of the objects are simultaneously calculated. The frame is annotated with this information and can be saved locally. Additionally, the results are stored in a JSON object. More features are available and will be detailed in a subsequent paragraph.
 
 <p align="center"><img src="assets/images/Annotated_frame_example.png" width="800"></p>
 
@@ -44,7 +44,7 @@ message = rabbitmq.receive_message()
 
 ### Kerberos Vault Integration
 
-The incoming messages provide the necessary information to retrieve media from the Kerberos Vault. The received media can then be easily written to a video file, allowing it to be used as input for the model. This functionality leverages the [`uugai-python-kerberos-vault`](https://pypi.org/project/uugai-python-dynamic-queue/) dependency. More information can be found in the corresponding [GitHub repository](https://github.com/uug-ai/uugai-python-kerberos-vault), and additional details about Kerberos Vault itself can be found here. Initialization is straightforward, as demonstrated in the code snippet below, which also lists the corresponding .env variables.
+The incoming messages provide the necessary information to retrieve media from the Kerberos Vault. The received media can then be easily written to a video file, allowing it to be used as input for the model. Initialization is straightforward, as demonstrated in the code snippet below, which also lists the corresponding .env variables.
 
 ```Python
 # Initialize Kerberos Vault
@@ -415,6 +415,6 @@ The `TIME_VERBOSE` environment variable includes extra time-related verbosity op
 
 This project exists thanks to all the people who contribute.
 
-<a href="https://github.com/uug-ai/object-classification-yolov8/agent/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=uug-ai/object-classification-yolov8" />
+<a href="https://github.com/uug-ai/hub-pipeline-classifier/agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=uug-ai/hub-pipeline-classifier" />
 </a>
