@@ -5,6 +5,7 @@ FROM python:3.10-slim-bookworm
 ADD https://github.com/ultralytics/assets/releases/download/v0.0.0/Arial.ttf \
     https://github.com/ultralytics/assets/releases/download/v0.0.0/Arial.Unicode.ttf \
     /root/.config/Ultralytics/
+    
 
 # Install linux packages and clean up (clean-up added, last line)
 RUN apt-get update && apt-get install --no-install-recommends -y \
