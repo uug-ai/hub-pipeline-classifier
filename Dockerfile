@@ -6,7 +6,6 @@ ADD https://github.com/ultralytics/assets/releases/download/v0.0.0/Arial.ttf \
     https://github.com/ultralytics/assets/releases/download/v0.0.0/Arial.Unicode.ttf \
     /root/.config/Ultralytics/
     
-
 # Install linux packages and clean up (clean-up added, last line)
 RUN apt-get update && apt-get install --no-install-recommends -y \
     python3-pip git zip curl htop libgl1 libglib2.0-0 libpython3-dev gnupg g++ libusb-1.0-0 && \
