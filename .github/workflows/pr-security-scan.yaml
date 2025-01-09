@@ -1,0 +1,61 @@
+name: Security scan
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ github.event.number }}
+      COMMIT_SHA: ${{ github.sha }}
+      TAG: hub-pipeline-sprite-pr${{ github.event.number }}-${{ github.sha }}
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Build the Docker image with the latest tag and the release tag
+      # Build the Docker image with the latest tag and the release tag
+      - name: Build Docker image with PR tag
+        run: |
+          docker build -t uugai/pullrequests:${{ env.TAG }} \
+          --build-arg github_username=${{ secrets.USERNAME }} \
+          --build-arg github_token=${{ secrets.TOKEN }} .
+
+      # This is a workaround for the issue with the Trivy DBs not being available due to
+      # rate limiting. The workaround is to download the DBs and cache them.
+      - name: Setup oras
+        uses: oras-project/setup-oras@v1
+      - name: Download and extract the vulnerability DB
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/.cache/trivy/db
+          oras pull ghcr.io/aquasecurity/trivy-db:2
+          tar -xzf db.tar.gz -C $GITHUB_WORKSPACE/.cache/trivy/db
+
+      # Scan the Docker image for vulnerabilities
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          skip-setup-trivy: false
+          scan-type: "image"
+          image-ref: "uugai/pullrequests:${{ env.TAG }}"
+          format: "table"
+          exit-code: "0"
+          ignore-unfixed: false
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN"
+          #Below only works on the main branch
+          #format: "github"
+          #github-pat: ${{ secrets.TOKEN }}
+        env:
+          TRIVY_SKIP_DB_UPDATE: true
