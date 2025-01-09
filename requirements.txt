@@ -52,6 +52,3 @@ typing_extensions==4.12.0
 tzdata==2024.1
 ultralytics==8.2.26
 urllib3==2.2.1
-uugai-python-color-prediction==3.0.0
-uugai-python-dynamic-queue==1.1.0
-uugai-python-kerberos-vault==1.2.0
