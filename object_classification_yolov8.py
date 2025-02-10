@@ -130,6 +130,8 @@ while True:
     # frame_skip_factor is the factor by which the input video frames are skipped.
     frame_number, predicted_frames = 0, 0
     frame_skip_factor = int(cap.get(cv2.CAP_PROP_FPS) / var.CLASSIFICATION_FPS)
+    if frame_skip_factor == 0:
+        continue
 
     # Loop over the video frames, and perform object classification.
     # The classification process is done until the counter reaches the MAX_NUMBER_OF_PREDICTIONS or the last frame is reached.
