@@ -1,0 +1,23 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/python
+{
+	"name": "Python 3",
+	"dockerFile": "Dockerfile",
+	"runArgs": [
+		"-e", "DISPLAY=docker.for.mac.host.internal:0"
+	],
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"GitHub.copilot",
+				"ms-azuretools.vscode-docker",
+				"mongodb.mongodb-vscode",
+				"ms-python.debugpy",
+				"ms-python.vscode-pylance",
+				"ms-python.pylint"
+			]
+		}
+	},
+	"postCreateCommand": "python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt"
+}
