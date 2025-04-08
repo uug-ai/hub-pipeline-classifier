@@ -327,7 +327,11 @@ while True:
     #  This is done by adding the data to the original message.
     if var.TARGET_QUEUE_NAME != "":
         message['operation'] = return_json.return_object['operation']
-        message['data'] = return_json.return_object['data']
+        if 'data' in message:
+            message['data'].update(return_json.return_object['data'])
+        else:
+            message['data'] = return_json.return_object['data']
+            
         return_message = json.dumps(message)
         rabbitmq.send_message(return_message)
 
