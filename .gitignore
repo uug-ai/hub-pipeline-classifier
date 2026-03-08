@@ -5,3 +5,4 @@ yolov8n.pt
 utils/__pycache__
 run.sh
 data
+.env.local
