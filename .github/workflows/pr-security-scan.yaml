@@ -44,11 +44,14 @@ jobs:
           oras pull ghcr.io/aquasecurity/trivy-db:2
           tar -xzf db.tar.gz -C $GITHUB_WORKSPACE/.cache/trivy/db
 
-      # Set up Trivy
-      - name: Set up Trivy
-        uses: aquasecurity/setup-trivy@v0.2.2
-        with:
-          version: v0.58.0
+      # Install Trivy directly from release artifacts
+      - name: Install Trivy
+        run: |
+          TRIVY_VERSION="0.69.3"
+          curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o /tmp/trivy.tar.gz
+          tar -xzf /tmp/trivy.tar.gz -C /tmp
+          sudo mv /tmp/trivy /usr/local/bin/trivy
+          trivy --version
 
       # Run the Trivy vulnerability scanner on the built image
       - name: Run Trivy vulnerability scanner
