@@ -54,7 +54,7 @@ jobs:
           ignore-unfixed: false
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN"
-          version: "v0.57.1"
+          version: "v0.58"
         env:
           TRIVY_SKIP_DB_UPDATE: true
           TRIVY_CACHE_DIR: ${{ github.workspace }}/.cache/trivy
