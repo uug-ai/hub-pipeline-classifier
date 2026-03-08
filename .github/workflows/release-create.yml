@@ -42,7 +42,13 @@ jobs:
           password: ${{ secrets.TOKEN }}
       - name: Run Build
         run: |
-          docker build --provenance -t "${{ matrix.architecture }}" --build-arg project="${{ env.PROJECT }}" --build-arg github_username="${{ secrets.USERNAME }}" --build-arg github_token="${{ secrets.TOKEN }}" .
+          docker build --provenance \
+            -t "${{ matrix.architecture }}" \
+            --build-arg project="${{ env.PROJECT }}" \
+            --build-arg github_username="${{ secrets.USERNAME }}" \
+            --build-arg github_token="${{ secrets.TOKEN }}" \
+            "${{ github.workspace }}"
+
       - name: Build and push Docker image
         run: |
           docker tag ${{matrix.architecture}} ghcr.io/$ORGANIZATION/$PROJECT-platform:${{matrix.architecture}}-${{github.event.inputs.tag || github.ref_name}}
