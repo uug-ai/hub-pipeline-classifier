@@ -44,11 +44,16 @@ jobs:
           oras pull ghcr.io/aquasecurity/trivy-db:2
           tar -xzf db.tar.gz -C $GITHUB_WORKSPACE/.cache/trivy/db
 
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@v0.2.2
+        with:
+          version: v0.57.1
+
       # Scan the Docker image for vulnerabilities
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@0.29.0
         with:
-          skip-setup-trivy: false
+          skip-setup-trivy: true
           scan-type: "image"
           image-ref: ${{ env.PROJECT }}
           format: "table"
