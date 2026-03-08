@@ -15,7 +15,7 @@ env:
   GITOPS_REPO: "uug-ai/gitops"
   GITOPS_FILE: "environments/staging/kerberos-hub/hub-pipeline-classifier.yaml"
   GITOPS_KEY: ".spec.template.spec.containers[0].image"
-  GITOPS_VALUE: "uugai/hub-pipeline-classifier:${{ github.event.inputs.tag || github.ref_name }}"
+  GITOPS_VALUE: "uug-ai/hub-pipeline-classifier:${{ github.event.inputs.tag || github.ref_name }}"
 
 jobs:
 
@@ -42,10 +42,12 @@ jobs:
           password: ${{ secrets.TOKEN }}
       - name: Run Build
         run: |
-          docker build --provenance -t ${{matrix.architecture}} \
-          --build-arg project=${{ env.PROJECT }} \
-          --build-arg github_username=${{ secrets.USERNAME }} \
-          --build-arg github_token=${{ secrets.TOKEN }} .
+          docker build --provenance \
+          -t "${{ matrix.architecture }}" \
+          --build-arg project="${{ env.PROJECT }}" \
+          --build-arg github_username="${{ secrets.USERNAME }}" \
+          --build-arg github_token="${{ secrets.TOKEN }}" \
+          .
 
       - name: Build and push Docker image
         run: |
