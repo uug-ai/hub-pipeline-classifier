@@ -42,12 +42,10 @@ jobs:
           password: ${{ secrets.TOKEN }}
       - name: Run Build
         run: |
-          docker build --provenance \
-            --build-arg project="${{ env.PROJECT }}" \
-            --build-arg github_username="${{ secrets.USERNAME }}" \
-            --build-arg github_token="${{ secrets.TOKEN }}" \
-            -t "${{ matrix.architecture }}" \
-            "${{ github.workspace }}"
+          docker build --provenance=false -t ${{matrix.architecture}} \
+          --build-arg project=${{ env.PROJECT }} \
+          --build-arg github_username=${{ secrets.USERNAME }} \
+          --build-arg github_token=${{ secrets.TOKEN }} .
 
       - name: Build and push Docker image
         run: |
@@ -93,7 +91,7 @@ jobs:
           github-token: ${{ secrets.TOKEN }}
           gitops-repo: "${{ env.GITOPS_REPO }}"
           gitops-file: "${{ env.GITOPS_FILE }}"
-          gitops-pr-branch: "release-hub-pipeline-classifier-${{ github.event.inputs.tag || github.ref_name }}"
+          gitops-pr-branch: "release-${{ env.PROJECT }}-${{ github.event.inputs.tag || github.ref_name }}"
           gitops-key: "${{ env.GITOPS_KEY }}"
           gitops-value: "${{ env.GITOPS_VALUE }}"
           commit-email: "gitops@uug.ai"
