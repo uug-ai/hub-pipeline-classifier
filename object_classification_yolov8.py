@@ -65,15 +65,25 @@ while True:
         print('2) Retrieving media from Kerberos Vault')
 
     print(message)
-    err = kerberos_vault.retrieve_media(
-        message=message,
-        media_type='video',
-        media_savepath=var.MEDIA_SAVEPATH)
+    max_download_attempts = 3
+    download_delay_seconds = 5
+    err = None
+    for attempt in range(1, max_download_attempts + 1):
+        err = kerberos_vault.retrieve_media(
+            message=message,
+            media_type='video',
+            media_savepath=var.MEDIA_SAVEPATH)
+        if err is None:
+            break
+        if var.LOGGING:
+            print(err)
+            print(f'Error retrieving media from Kerberos Vault (attempt {attempt}/{max_download_attempts})')
+        if attempt < max_download_attempts:
+            time.sleep(download_delay_seconds)
 
     if err is not None:
         if var.LOGGING:
-            print(err)
-            print('Error retrieving media from Kerberos Vault')
+            print('Skipping message and waiting for next one')
         continue
 
     if var.TIME_VERBOSE:
@@ -89,7 +99,22 @@ while True:
     # Perform object classification on the media
     # initialise the yolo model, additionally use the device parameter to specify the device to run the model on.
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    MODEL = YOLO(var.MODEL_NAME).to(device)
+    max_model_load_attempts = 3
+    model_load_delay_seconds = 5
+    MODEL = None
+    for attempt in range(1, max_model_load_attempts + 1):
+        try:
+            MODEL = YOLO(var.MODEL_NAME).to(device)
+            break
+        except Exception as exc:
+            if var.LOGGING:
+                print(f'Error loading YOLO model (attempt {attempt}/{max_model_load_attempts}): {exc}')
+            if attempt < max_model_load_attempts:
+                time.sleep(model_load_delay_seconds)
+    if MODEL is None:
+        if var.LOGGING:
+            print('Skipping message and waiting for next one')
+        continue
     if var.LOGGING:
         print(f'3) Using device: {device}')
 
@@ -337,6 +362,7 @@ while True:
 
     # Depending on the TIME_VERBOSE parameter, the time it took to classify the objects is printed.
     if var.TIME_VERBOSE:
+        fps = cap.get(cv2.CAP_PROP_FPS)
         print(
             f'\t - Classification took: {round(time.time() - start_time, 1)} seconds, @ {var.CLASSIFICATION_FPS} fps.')
         print(
@@ -351,7 +377,9 @@ while True:
             f'\t\t\t - {round(total_time_processing - total_time_class_prediction - total_time_color_prediction, 2)}s for other processing')
         print(
             f'\t\t - {round(total_time_postprocessing, 2)}s for postprocessing')
-        print(f'\t - Original video: {round(cap.get(cv2.CAP_PROP_FRAME_COUNT)/cap.get(cv2.CAP_PROP_FPS), 1)} seconds, @ {round(cap.get(cv2.CAP_PROP_FPS), 1)} fps @ {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}. File size of {round(os.path.getsize(var.MEDIA_SAVEPATH)/1024**2, 1)} MB')
+        # Avoid division by zero if FPS metadata is missing or invalid.
+        duration_seconds = cap.get(cv2.CAP_PROP_FRAME_COUNT) / fps if fps else 0
+        print(f'\t - Original video: {round(duration_seconds, 1)} seconds, @ {round(fps, 1)} fps @ {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}. File size of {round(os.path.getsize(var.MEDIA_SAVEPATH)/1024**2, 1)} MB')
 
     # If the videowriter was active, the videowriter is released.
     # Close the video-capture and destroy all windows.
