@@ -43,10 +43,10 @@ jobs:
       - name: Run Build
         run: |
           docker build --provenance \
-            -t "${{ matrix.architecture }}" \
             --build-arg project="${{ env.PROJECT }}" \
             --build-arg github_username="${{ secrets.USERNAME }}" \
             --build-arg github_token="${{ secrets.TOKEN }}" \
+            -t "${{ matrix.architecture }}" \
             "${{ github.workspace }}"
 
       - name: Build and push Docker image
