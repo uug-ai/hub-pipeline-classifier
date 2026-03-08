@@ -48,6 +48,8 @@ jobs:
         uses: aquasecurity/setup-trivy@v0.2.2
         with:
           version: v0.57.1
+        env:
+          ACTIONS_STEP_DEBUG: true
 
       # Scan the Docker image for vulnerabilities
       - name: Run Trivy vulnerability scanner
