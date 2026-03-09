@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: hub-yolov8
-          image: uugai/hub-yolov8:latest
+          image: ghcr.io/uug-ai/hub-pipeline-classifier:v1.5.5
           resources:
             limits:
               nvidia.com/gpu: 1 # requesting a single GPU
