@@ -1,4 +1,5 @@
 import requests
+import requests.exceptions
 import json
 
 
@@ -87,8 +88,12 @@ class KerberosVault:
         headers = self.create_headers(
             message['payload']['key'], message['source'])
 
-        resp = requests.get(self.storage_uri +
-                            "/storage", headers=headers, timeout=10)
+        try:
+            resp = requests.get(self.storage_uri +
+                                "/storage", headers=headers, timeout=10)
+        except requests.exceptions.RequestException as e:
+            print("Error: failed to connect to Kerberos Vault:", e)
+            return str(e).encode()
 
         if resp is None or resp.status_code != 200:
             return resp.content
