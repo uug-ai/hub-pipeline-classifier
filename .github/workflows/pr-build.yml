@@ -7,10 +7,8 @@ jobs:
   build:
     uses: uug-ai/workflows/.github/workflows/pr-build.yml@main
     with:
+      language: python
       project: ${{ github.event.repository.name }}
-      go_version: "1.25.8"
-      go_dir: "."
-      go_sum_path: "go.sum"
       docker_context: "."
       runner_matrix: '[{"architecture":"amd64","runner":"ubuntu-24.04"},{"architecture":"arm64","runner":"ubuntu-24.04-arm"}]'
     secrets: inherit
