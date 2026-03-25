@@ -17,5 +17,8 @@ jobs:
           {"architecture":"arm64","runner":"github-runner-set-arm64"}
         ]
       create_gitops_pr: true
-      gitops_key: kerberospipeline.export.tag
+      gitops_repo: "uug-ai/gitops"
+      gitops_file: "environments/staging/kerberos-hub/hub-pipeline-classifier.yaml"
+      gitops_key: ".spec.template.spec.containers[0].image"
+      gitops_value: "uug-ai/hub-pipeline-classifier:${{ github.event.release.tag_name }}"
     secrets: inherit
