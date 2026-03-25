@@ -128,6 +128,8 @@ class RabbitMQ(MessageBroker):
                     "@" + host + "/"
 
             url_parameter = pika.URLParameters(url_string)
+            url_parameter.heartbeat = 120
+            url_parameter.blocked_connection_timeout = 300
             self.connection = pika.BlockingConnection(url_parameter)
             self.readChannel = self.connection.channel()
             self.publishChannel = self.connection.channel()
@@ -137,19 +139,28 @@ class RabbitMQ(MessageBroker):
 
         """
 
-        # Check if connection to RabbitMQ is open, if not, reconnect
-        if not self.connection.is_open:
-            print("Connection to RabbitMQ is not open")
+        try:
+            # Check if connection to RabbitMQ is open, if not, reconnect
+            if not self.connection.is_open:
+                print("Connection to RabbitMQ is not open")
+                self.connect()
+
+            # Check if readChannel is closed, if yes, reinitialize
+            if self.readChannel.is_closed:
+                print("Channel to RabbitMQ is closed")
+                self.readChannel = self.connection.channel()
+
+            # Fetch a message from the queue
+            method_frame, header_frame, body = self.readChannel.basic_get(
+                self.queue_name, auto_ack=True)
+
+        except (pika.exceptions.AMQPHeartbeatTimeout,
+                pika.exceptions.AMQPConnectionError,
+                pika.exceptions.ConnectionClosedByBroker):
+            print("Connection lost, reconnecting to RabbitMQ")
             self.connect()
-
-        # Check if readChannel is closed, if yes, reinitialize
-        if self.readChannel.is_closed:
-            print("Channel to RabbitMQ is closed")
-            self.readChannel = self.connection.channel()
-
-        # Fetch a message from the queue
-        method_frame, header_frame, body = self.readChannel.basic_get(
-            self.queue_name, auto_ack=True)
+            method_frame, header_frame, body = self.readChannel.basic_get(
+                self.queue_name, auto_ack=True)
 
         # If no message available, sleep and return empty list
         if body is None:
@@ -175,7 +186,9 @@ class RabbitMQ(MessageBroker):
                 exchange=self.exchange, routing_key=self.target_queue_name, body=message)
 
         # Handle connection and channel closure exceptions
-        except pika.exceptions.ConnectionClosed:
+        except (pika.exceptions.ConnectionClosed,
+                pika.exceptions.AMQPHeartbeatTimeout,
+                pika.exceptions.AMQPConnectionError):
             print('Reconnecting to queue')
             self.connect()
             self.publishChannel.basic_publish(
