@@ -1,0 +1,14 @@
+name: Build pull request
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build:
+    uses: uug-ai/workflows/.github/workflows/pr-build.yml@main
+    with:
+      language: python
+      project: ${{ github.event.repository.name }}
+      docker_context: "."
+      runner_matrix: '[{"architecture":"amd64","runner":"ubuntu-24.04"},{"architecture":"arm64","runner":"ubuntu-24.04-arm"}]'
+    secrets: inherit
