@@ -125,6 +125,10 @@ while True:
     if not cap.isOpened():
         FileNotFoundError('Unable to open video file')
 
+    # Record the source frame rate so it can be persisted as media metadata,
+    # independent of which storage layer produced the recording.
+    source_fps = cap.get(cv2.CAP_PROP_FPS)
+
     # Initialize the video-writer if the SAVE_VIDEO is set to True.
     if var.SAVE_VIDEO:
         fourcc = cv2.VideoWriter.fourcc(*'avc1')
@@ -325,6 +329,7 @@ while True:
         if var.LOGGING:
             print('7) Creating ReturnJSON object')
         return_json = ReturnJSON()
+        return_json.set_source_fps(source_fps)
 
         # Depending on the user preference, the detected objects are filtered.
         # In this case, the objects are filtered based on the MIN_DETECTIONS parameters.
