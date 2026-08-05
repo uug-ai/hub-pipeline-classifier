@@ -12,31 +12,14 @@ class ReturnJSON:
         self.object_count = 0
         self.properties = []
         self.details = []
-        self.fps = 0
 
         self.return_object = {'operation': 'classify',
                               'data': {
                                   'objectCount': self.object_count,
                                   'properties': self.properties,
-                                  'details': self.details,
-                                  'fps': self.fps
+                                  'details': self.details
                               }
                               }
-
-    def set_source_fps(self, fps):
-        """ Records the source video's frame rate (rounded to the nearest integer)
-        so downstream consumers can persist it as media metadata, independent of
-        the storage layer that produced the recording.
-        :param fps: Frame rate as reported by the video capture (may be float).
-
-        """
-
-        try:
-            rounded = int(round(float(fps)))
-        except (TypeError, ValueError):
-            rounded = 0
-        self.fps = rounded if rounded > 0 else 0
-        self.return_object['data']['fps'] = self.fps
 
     def add_detected_object(self, det_obj: ClassificationObject):
         """ Adds a detected object to the ReturnJSON class object.
