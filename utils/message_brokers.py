@@ -82,6 +82,9 @@ class RabbitMQ(MessageBroker):
         self.username = username
         self.password = password
         self.target_queue_name = target_queue_name
+        self.connection = None
+        self.readChannel = None
+        self.publishChannel = None
 
         # Establish connection to RabbitMQ
         self.connect()
@@ -97,7 +100,7 @@ class RabbitMQ(MessageBroker):
                 "Connection to RabbitMQ is not opened, have you filled in the correct credentials?")
 
         # Check if connection is open otherwise kill
-        if not self.connection.is_open:
+        if self.connection is None or not self.connection.is_open:
             print("Connection to RabbitMQ is not open")
             sys.exit(1)
 
@@ -105,6 +108,12 @@ class RabbitMQ(MessageBroker):
         """ Establishes a connection to RabbitMQ.
 
         """
+
+        if self.connection is not None and self.connection.is_open:
+            try:
+                self.connection.close()
+            except pika.exceptions.AMQPError:
+                pass
 
         host = self.host
         username = self.username
@@ -134,21 +143,42 @@ class RabbitMQ(MessageBroker):
             self.readChannel = self.connection.channel()
             self.publishChannel = self.connection.channel()
 
+    def ensure_connection(self) -> None:
+        """Ensure the RabbitMQ connection and channels are open."""
+
+        if self.connection is None or self.connection.is_closed:
+            print("Connection to RabbitMQ is not open, reconnecting")
+            self.connect()
+
+        if self.readChannel is None or self.readChannel.is_closed:
+            print("Read channel to RabbitMQ is closed, recreating")
+            self.readChannel = self.connection.channel()
+
+        if self.publishChannel is None or self.publishChannel.is_closed:
+            print("Publish channel to RabbitMQ is closed, recreating")
+            self.publishChannel = self.connection.channel()
+
+    def process_data_events(self) -> None:
+        """Service BlockingConnection events so heartbeats are sent."""
+
+        try:
+            self.ensure_connection()
+            self.connection.process_data_events(time_limit=0)
+        except (pika.exceptions.AMQPHeartbeatTimeout,
+                pika.exceptions.AMQPConnectionError,
+                pika.exceptions.ConnectionClosed,
+                pika.exceptions.ConnectionClosedByBroker):
+            print("Connection lost while servicing RabbitMQ events")
+            self.connect()
+
     def receive_message(self) -> list[dict]:
         """ Receives messages from the RabbitMQ queue.
 
         """
 
         try:
-            # Check if connection to RabbitMQ is open, if not, reconnect
-            if not self.connection.is_open:
-                print("Connection to RabbitMQ is not open")
-                self.connect()
-
-            # Check if readChannel is closed, if yes, reinitialize
-            if self.readChannel.is_closed:
-                print("Channel to RabbitMQ is closed")
-                self.readChannel = self.connection.channel()
+            self.ensure_connection()
+            self.connection.process_data_events(time_limit=0)
 
             # Fetch a message from the queue
             method_frame, header_frame, body = self.readChannel.basic_get(
@@ -156,6 +186,7 @@ class RabbitMQ(MessageBroker):
 
         except (pika.exceptions.AMQPHeartbeatTimeout,
                 pika.exceptions.AMQPConnectionError,
+                pika.exceptions.ConnectionClosed,
                 pika.exceptions.ConnectionClosedByBroker):
             print("Connection lost, reconnecting to RabbitMQ")
             self.connect()
@@ -164,7 +195,9 @@ class RabbitMQ(MessageBroker):
 
         # If no message available, sleep and return empty list
         if body is None:
+            self.connection.process_data_events(time_limit=0)
             time.sleep(3.0)
+            self.process_data_events()
             return []
 
         # Otherwise, return the received message
@@ -181,9 +214,12 @@ class RabbitMQ(MessageBroker):
         """
 
         try:
+            self.ensure_connection()
+            self.connection.process_data_events(time_limit=0)
             # Publish the message to the RabbitMQ exchange
             self.publishChannel.basic_publish(
                 exchange=self.exchange, routing_key=self.target_queue_name, body=message)
+            self.connection.process_data_events(time_limit=0)
 
         # Handle connection and channel closure exceptions
         except (pika.exceptions.ConnectionClosed,
@@ -193,11 +229,13 @@ class RabbitMQ(MessageBroker):
             self.connect()
             self.publishChannel.basic_publish(
                 exchange=self.exchange, routing_key=self.target_queue_name, body=message)
+            self.connection.process_data_events(time_limit=0)
         except pika.exceptions.ChannelClosed:
             print('Reconnecting to queue')
             self.publishChannel = self.connection.channel()
             self.publishChannel.basic_publish(
                 exchange=self.exchange, routing_key=self.target_queue_name, body=message)
+            self.connection.process_data_events(time_limit=0)
 
     def close(self) -> bool:
         """ Closes the connection to RabbitMQ.
