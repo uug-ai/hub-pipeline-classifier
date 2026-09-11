@@ -56,6 +56,8 @@ spec:
               value: "coco.yaml"
             - name: INFERENCE_IMAGE_SIZE
               value: "512"
+            - name: CPU_THREADS
+              value: "1"
             - name: MEDIA_SAVEPATH
               value: "/ml/data/input/video.mp4"
 

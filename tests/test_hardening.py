@@ -241,6 +241,7 @@ class FakeVar:
     TRITON_MODEL_TASK = 'detect'
     TRITON_DATA_CONFIG = 'coco.yaml'
     INFERENCE_IMAGE_SIZE = 512
+    CPU_THREADS = 1
     QUEUE_NAME = 'source'
     QUEUE_EXCHANGE = ''
     QUEUE_HOST = 'rabbitmq:5672'
@@ -341,11 +342,13 @@ def import_classifier_with_fakes(capture):
         imshow=lambda *args, **kwargs: None,
         waitKey=lambda *args, **kwargs: None,
         imwrite=lambda *args, **kwargs: None,
+        setNumThreads=mock.Mock(),
         destroyAllWindows=mock.Mock(),
     )
     sys.modules['cv2'] = fake_cv2
     sys.modules['torch'] = types.SimpleNamespace(
-        cuda=types.SimpleNamespace(is_available=lambda: False)
+        cuda=types.SimpleNamespace(is_available=lambda: False),
+        set_num_threads=mock.Mock(),
     )
     sys.modules['numpy'] = types.SimpleNamespace(
         int32=lambda value: value,
@@ -382,6 +385,12 @@ class ModelLoadingBackendTest(unittest.TestCase):
         self.classifier, _ = import_classifier_with_fakes(FakeVideoCapture(fps=30, frame_count=1))
         FakeYOLO.instances = []
         self.classifier.YOLO = FakeYOLO
+
+    def test_configures_native_cpu_thread_pools(self):
+        self.classifier.configure_cpu_threads(FakeVar())
+
+        self.classifier.torch.set_num_threads.assert_called_once_with(1)
+        self.classifier.cv2.setNumThreads.assert_called_once_with(1)
 
     def test_loads_local_model_on_worker_device(self):
         model = self.classifier.load_model(FakeVar())

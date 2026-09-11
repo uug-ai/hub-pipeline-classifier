@@ -29,6 +29,15 @@ from ultralytics import YOLO
 # torch.backends.nnpack.enabled = False
 
 
+def configure_cpu_threads(var):
+    """Limit native CPU pools so multiple workers do not oversubscribe the host."""
+
+    if var.CPU_THREADS < 1:
+        raise ValueError('CPU_THREADS must be at least 1')
+    torch.set_num_threads(var.CPU_THREADS)
+    cv2.setNumThreads(var.CPU_THREADS)
+
+
 def configure_worker_paths(var, process_id=None):
     """Give each worker its own local files when multiple processes run."""
 
@@ -432,6 +441,7 @@ def ensure_model_loaded(var, rabbitmq, model):
 
 def main():
     var = VariableClass()
+    configure_cpu_threads(var)
     configure_worker_paths(var)
 
     if var.LOGGING:

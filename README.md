@@ -37,11 +37,14 @@ TRITON_MODEL_URL="http://10.0.1.24:8000/<model-name>"
 TRITON_MODEL_TASK="segment"
 TRITON_DATA_CONFIG="coco.yaml"
 INFERENCE_IMAGE_SIZE="512"
+CPU_THREADS="1"
 ```
 
 `TRITON_MODEL_URL` must contain the Triton repository model name as its first path segment; use `http://host:8000/model-name`, not the REST metadata route `http://host:8000/v2/models/model-name`. `TRITON_MODEL_TASK` must match the deployed model, for example `detect` or `segment`. `TRITON_DATA_CONFIG` supplies class names when the Triton model config does not contain Ultralytics metadata. `INFERENCE_IMAGE_SIZE` controls the square inference resolution; smaller values improve throughput but may miss small objects. The Triton model must expose Ultralytics-compatible inputs and outputs. When using Triton in Kubernetes, remove the worker's `nvidia.com/gpu` resource limit so the pod does not reserve an embedded GPU; add it back when selecting local GPU inference.
 
 Both raw YOLOv8 detection output (`[batch, 84, anchors]`) and end-to-end YOLO26 output (`[batch, 300, 6]`) are supported. To use the deployed YOLO26 model, set `TRITON_MODEL_URL="http://host:8000/yolo26"` and `TRITON_MODEL_TASK="detect"`.
+
+`CPU_THREADS` limits the PyTorch and OpenCV native thread pools in each worker. Keep it at `1` when running multiple worker processes against Triton to prevent CPU oversubscription.
 
 ### Queue Message Reader
 
