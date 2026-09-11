@@ -3,6 +3,10 @@ on:
   release:
     types: [created]
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   release:
     uses: uug-ai/workflows/.github/workflows/release-create.yml@main
