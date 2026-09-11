@@ -19,7 +19,6 @@ spec:
           image: ghcr.io/uug-ai/hub-pipeline-classifier:v1.5.5
           resources:
             limits:
-              nvidia.com/gpu: 1 # requesting a single GPU
               cpu: 2
               memory: 2Gi
           env: 
@@ -47,6 +46,16 @@ spec:
             # YOLOv8 parameters
             - name: MODEL_NAME
               value: "yolov8n.pt"
+            - name: INFERENCE_BACKEND
+              value: "triton"
+            - name: TRITON_MODEL_URL
+              value: "http://10.1.5.254:8000/yolov8"
+            - name: TRITON_MODEL_TASK
+              value: "detect"
+            - name: TRITON_DATA_CONFIG
+              value: "coco.yaml"
+            - name: INFERENCE_IMAGE_SIZE
+              value: "512"
             - name: MEDIA_SAVEPATH
               value: "/ml/data/input/video.mp4"
 

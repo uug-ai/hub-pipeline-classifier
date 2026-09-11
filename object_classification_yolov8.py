@@ -32,16 +32,34 @@ from ultralytics import YOLO
 def load_model(var):
     """Load the YOLO model once for the worker process."""
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    inference_backend = var.INFERENCE_BACKEND.lower()
+    if inference_backend not in {'local', 'triton'}:
+        raise ValueError(f'Unsupported inference backend: {var.INFERENCE_BACKEND}')
+
+    model_source = var.TRITON_MODEL_URL if inference_backend == 'triton' else var.MODEL_NAME
+    if not model_source:
+        raise ValueError(f'Model source is required for the {inference_backend} inference backend')
+
+    device = 'remote' if inference_backend == 'triton' else ('cuda' if torch.cuda.is_available() else 'cpu')
     max_model_load_attempts = 3
     model_load_delay_seconds = 5
     model = None
 
     for attempt in range(1, max_model_load_attempts + 1):
         try:
-            model = YOLO(var.MODEL_NAME).to(device)
+            if inference_backend == 'triton':
+                model = YOLO(model_source, task=var.TRITON_MODEL_TASK)
+                model.predict(
+                    source=np.zeros((32, 32, 3), dtype=np.uint8),
+                    data=var.TRITON_DATA_CONFIG,
+                    imgsz=var.INFERENCE_IMAGE_SIZE,
+                    verbose=False)
+            else:
+                model = YOLO(model_source)
+                model = model.to(device)
             break
         except Exception as exc:
+            model = None
             if var.LOGGING:
                 print(f'Error loading YOLO model (attempt {attempt}/{max_model_load_attempts}): {exc}')
             if attempt < max_model_load_attempts:
@@ -180,12 +198,21 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
             if frame_number % frame_skip_factor == 0:
                 if var.TIME_VERBOSE:
                     start_time_class_prediction = time.time()
-                results = model.track(
+                track_options = dict(
                     source=frame,
                     persist=True,
                     verbose=False,
                     conf=var.CLASSIFICATION_THRESHOLD,
+                    imgsz=var.INFERENCE_IMAGE_SIZE,
                     classes=var.ALLOWED_CLASSIFICATIONS)
+                if var.INFERENCE_BACKEND == 'triton':
+                    track_options['data'] = var.TRITON_DATA_CONFIG
+                try:
+                    results = model.track(**track_options)
+                except Exception:
+                    if var.INFERENCE_BACKEND == 'triton':
+                        model.predictor = None
+                    raise
                 if var.TIME_VERBOSE:
                     total_time_class_prediction += time.time() - start_time_class_prediction
 

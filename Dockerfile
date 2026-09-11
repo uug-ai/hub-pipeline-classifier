@@ -44,6 +44,11 @@ ENV MEDIA_SAVEPATH "/ml/data/input/input_video.mp4"
 
 # Model parameters
 ENV MODEL_NAME "yolov8n-seg.pt"
+ENV INFERENCE_BACKEND "local"
+ENV TRITON_MODEL_URL ""
+ENV TRITON_MODEL_TASK "segment"
+ENV TRITON_DATA_CONFIG "coco.yaml"
+ENV INFERENCE_IMAGE_SIZE "640"
 
 # Queue parameters
 ENV QUEUE_NAME "" 

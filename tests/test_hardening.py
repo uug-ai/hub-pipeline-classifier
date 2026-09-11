@@ -220,6 +220,11 @@ class FakeVar:
     LOGGING = False
     TIME_VERBOSE = False
     MODEL_NAME = 'fake.pt'
+    INFERENCE_BACKEND = 'local'
+    TRITON_MODEL_URL = 'http://triton:8000/fake_model'
+    TRITON_MODEL_TASK = 'segment'
+    TRITON_DATA_CONFIG = 'coco.yaml'
+    INFERENCE_IMAGE_SIZE = 512
     QUEUE_NAME = 'source'
     QUEUE_EXCHANGE = ''
     QUEUE_HOST = 'rabbitmq:5672'
@@ -252,12 +257,14 @@ class FakeVar:
 
 class FakeModel:
     def __init__(self):
+        self.track_calls = []
         self.predictor = types.SimpleNamespace(
             trackers=[FakeTracker()],
             vid_path=['/tmp/previous.mp4'],
         )
 
     def track(self, **kwargs):
+        self.track_calls.append(kwargs)
         return [types.SimpleNamespace(boxes=[], masks=None, names={})]
 
 
@@ -267,6 +274,36 @@ class FakeTracker:
 
     def reset(self):
         self.reset_calls += 1
+
+
+class FailingTrackModel(FakeModel):
+    def track(self, **kwargs):
+        self.predictor.model = None
+        raise ConnectionError('Triton unavailable')
+
+
+class FakeYOLO:
+    instances = []
+
+    def __init__(self, source, task=None):
+        self.source = source
+        self.task = task
+        self.to_calls = []
+        self.predict_calls = []
+        self.__class__.instances.append(self)
+
+    def to(self, device):
+        self.to_calls.append(device)
+        return self
+
+    def predict(self, **kwargs):
+        self.predict_calls.append(kwargs)
+        return []
+
+
+class UnavailableTritonYOLO(FakeYOLO):
+    def predict(self, **kwargs):
+        raise ConnectionError('Triton unavailable')
 
 
 def import_classifier_with_fakes(capture):
@@ -286,7 +323,11 @@ def import_classifier_with_fakes(capture):
     sys.modules['torch'] = types.SimpleNamespace(
         cuda=types.SimpleNamespace(is_available=lambda: False)
     )
-    sys.modules['numpy'] = types.SimpleNamespace(int32=lambda value: value)
+    sys.modules['numpy'] = types.SimpleNamespace(
+        int32=lambda value: value,
+        uint8='uint8',
+        zeros=lambda shape, dtype: (shape, dtype),
+    )
     sys.modules['ultralytics'] = types.SimpleNamespace(YOLO=object)
     sys.modules['utils.ReturnObject'] = types.SimpleNamespace(ReturnJSON=FakeReturnJSON)
     sys.modules['utils.TranslateObject'] = types.SimpleNamespace(translate=lambda value: value)
@@ -309,7 +350,76 @@ def import_classifier_with_fakes(capture):
     return module, fake_cv2
 
 
+class ModelLoadingBackendTest(unittest.TestCase):
+    def setUp(self):
+        self.classifier, _ = import_classifier_with_fakes(FakeVideoCapture(fps=30, frame_count=1))
+        FakeYOLO.instances = []
+        self.classifier.YOLO = FakeYOLO
+
+    def test_loads_local_model_on_worker_device(self):
+        model = self.classifier.load_model(FakeVar())
+
+        self.assertEqual(model.source, 'fake.pt')
+        self.assertIsNone(model.task)
+        self.assertEqual(model.to_calls, ['cpu'])
+        self.assertEqual(model.predict_calls, [])
+
+    def test_loads_triton_model_without_using_worker_device(self):
+        var = FakeVar()
+        var.INFERENCE_BACKEND = 'triton'
+
+        model = self.classifier.load_model(var)
+
+        self.assertEqual(model.source, 'http://triton:8000/fake_model')
+        self.assertEqual(model.task, 'segment')
+        self.assertEqual(model.to_calls, [])
+        self.assertEqual(model.predict_calls[0]['data'], 'coco.yaml')
+        self.assertEqual(model.predict_calls[0]['imgsz'], 512)
+
+    def test_unavailable_triton_fails_model_loading_after_retries(self):
+        var = FakeVar()
+        var.INFERENCE_BACKEND = 'triton'
+        self.classifier.YOLO = UnavailableTritonYOLO
+        UnavailableTritonYOLO.instances = []
+
+        with mock.patch.object(self.classifier.time, 'sleep') as sleep_mock:
+            with self.assertRaisesRegex(RuntimeError, 'Unable to load YOLO model'):
+                self.classifier.load_model(var)
+
+        self.assertEqual(len(UnavailableTritonYOLO.instances), 3)
+        self.assertEqual(sleep_mock.call_count, 2)
+
+
 class ClassifierCleanupTest(unittest.TestCase):
+    def test_triton_failure_discards_partial_predictor(self):
+        capture = FakeVideoCapture(fps=30, frame_count=1)
+        classifier, _ = import_classifier_with_fakes(capture)
+        var = FakeVar()
+        var.INFERENCE_BACKEND = 'triton'
+        model = FailingTrackModel()
+
+        with self.assertRaisesRegex(ConnectionError, 'Triton unavailable'):
+            classifier.process_message(
+                var, model, FakeRabbitMQ(), FakeVault(), {'payload': {'key': 'video'}, 'source': 'vault'}
+            )
+
+        self.assertIsNone(model.predictor)
+
+    def test_triton_inference_uses_configured_class_names(self):
+        capture = FakeVideoCapture(fps=30, frame_count=1)
+        classifier, _ = import_classifier_with_fakes(capture)
+        var = FakeVar()
+        var.INFERENCE_BACKEND = 'triton'
+        model = FakeModel()
+
+        processed = classifier.process_message(
+            var, model, FakeRabbitMQ(), FakeVault(), {'payload': {'key': 'video'}, 'source': 'vault'}
+        )
+
+        self.assertTrue(processed)
+        self.assertEqual(model.track_calls[0]['data'], 'coco.yaml')
+        self.assertEqual(model.track_calls[0]['imgsz'], 512)
+
     def test_low_fps_message_releases_capture(self):
         capture = FakeVideoCapture(fps=1, frame_count=1)
         classifier, cv2 = import_classifier_with_fakes(capture)

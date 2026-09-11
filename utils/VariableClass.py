@@ -18,6 +18,11 @@ class VariableClass:
 
         # Model parameters
         self.MODEL_NAME = os.getenv("MODEL_NAME")
+        self.INFERENCE_BACKEND = os.getenv("INFERENCE_BACKEND", "local").strip().lower()
+        self.TRITON_MODEL_URL = os.getenv("TRITON_MODEL_URL")
+        self.TRITON_MODEL_TASK = os.getenv("TRITON_MODEL_TASK", "segment").strip().lower()
+        self.TRITON_DATA_CONFIG = os.getenv("TRITON_DATA_CONFIG", "coco.yaml").strip()
+        self.INFERENCE_IMAGE_SIZE = int(os.getenv("INFERENCE_IMAGE_SIZE", "640"))
         self.MEDIA_SAVEPATH = os.getenv("MEDIA_SAVEPATH")
 
         # Queue parameters

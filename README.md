@@ -22,7 +22,24 @@ This repository offers numerous options and additional features to optimally con
 
 YOLOv8 offers a range of models catering to various accuracy-performance trade-offs. Among these, [`yolov8n.pt`](https://docs.ultralytics.com/models/yolov8/#supported-tasks-and-modes) is the most performance-focused, while [`yolov8x.pt`](https://docs.ultralytics.com/models/yolov8/#supported-tasks-and-modes) emphasizes accuracy. Intermediate models such as [`yolov8s`](https://docs.ultralytics.com/models/yolov8/#supported-tasks-and-modes), [`yolov8m`](https://docs.ultralytics.com/models/yolov8/#supported-tasks-and-modes), and [`yolov8l`](https://docs.ultralytics.com/models/yolov8/#supported-tasks-and-modes) progressively balance performance and accuracy. The aforementioned models are **[classification models](https://docs.ultralytics.com/tasks/detect/) only**. Additionally, the object classification supports **[segmentation models](https://docs.ultralytics.com/tasks/segment/)**, which have similar names but include '-seg' (e.g., `yolov8n-seg.pt`). Segmentation models provide the advantage of removing the background and overlapping objects for main color calculation, which will be detailed further in the color prediction feature description.
 
-The utilised model can be altered at `MODEL_NAME` .env variable.
+The utilised local model can be altered with the `MODEL_NAME` environment variable.
+
+Inference can run locally or on an NVIDIA Triton Inference Server:
+
+```dotenv
+# Local CPU/GPU inference (default)
+INFERENCE_BACKEND="local"
+MODEL_NAME="yolov8n-seg.pt"
+
+# Remote inference; tracking and result processing remain in this worker
+INFERENCE_BACKEND="triton"
+TRITON_MODEL_URL="http://10.0.1.24:8000/<model-name>"
+TRITON_MODEL_TASK="segment"
+TRITON_DATA_CONFIG="coco.yaml"
+INFERENCE_IMAGE_SIZE="512"
+```
+
+`TRITON_MODEL_URL` must contain the Triton repository model name as its first path segment; use `http://host:8000/model-name`, not the REST metadata route `http://host:8000/v2/models/model-name`. `TRITON_MODEL_TASK` must match the deployed model, for example `detect` or `segment`. `TRITON_DATA_CONFIG` supplies class names when the Triton model config does not contain Ultralytics metadata. `INFERENCE_IMAGE_SIZE` controls the square inference resolution; smaller values improve throughput but may miss small objects. The Triton model must expose Ultralytics-compatible inputs and outputs. When using Triton in Kubernetes, remove the worker's `nvidia.com/gpu` resource limit so the pod does not reserve an embedded GPU; add it back when selecting local GPU inference.
 
 ### Queue Message Reader
 
