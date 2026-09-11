@@ -3,6 +3,7 @@ import json
 import sys
 import pika
 import time
+from urllib.parse import quote
 from confluent_kafka import Producer, Consumer
 
 
@@ -129,11 +130,13 @@ class RabbitMQ(MessageBroker):
                 protocol = 'amqps'
                 host = host.replace('amqps://', '')
 
+            encoded_username = quote(username, safe='')
+            encoded_password = quote(password, safe='')
             if not protocol:
-                url_string = "amqp://" + username + ":" + password + \
+                url_string = "amqp://" + encoded_username + ":" + encoded_password + \
                     "@" + host + "/"
             else:
-                url_string = protocol + "://" + username + ":" + password + \
+                url_string = protocol + "://" + encoded_username + ":" + encoded_password + \
                     "@" + host + "/"
 
             url_parameter = pika.URLParameters(url_string)

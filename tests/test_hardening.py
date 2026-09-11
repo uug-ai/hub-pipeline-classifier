@@ -95,6 +95,22 @@ def import_broker_module():
 
 
 class RabbitMQHardeningTest(unittest.TestCase):
+    def test_connect_percent_encodes_credentials(self):
+        message_brokers = import_broker_module()
+        broker = message_brokers.RabbitMQ(
+            queue_name='source',
+            target_queue_name='target',
+            exchange='',
+            host='rabbitmq:5672',
+            username='user@example.com',
+            password='p@$$:word/with?reserved#chars',
+        )
+
+        self.assertEqual(
+            broker.connection.parameters.url,
+            'amqp://user%40example.com:p%40%24%24%3Aword%2Fwith%3Freserved%23chars@rabbitmq:5672/',
+        )
+
     def test_receive_services_heartbeat_while_idle(self):
         message_brokers = import_broker_module()
         broker = message_brokers.RabbitMQ(
@@ -222,7 +238,7 @@ class FakeVar:
     MODEL_NAME = 'fake.pt'
     INFERENCE_BACKEND = 'local'
     TRITON_MODEL_URL = 'http://triton:8000/fake_model'
-    TRITON_MODEL_TASK = 'segment'
+    TRITON_MODEL_TASK = 'detect'
     TRITON_DATA_CONFIG = 'coco.yaml'
     INFERENCE_IMAGE_SIZE = 512
     QUEUE_NAME = 'source'
@@ -290,6 +306,8 @@ class FakeYOLO:
         self.task = task
         self.to_calls = []
         self.predict_calls = []
+        self.predictor = None
+        self.callbacks = {}
         self.__class__.instances.append(self)
 
     def to(self, device):
@@ -298,12 +316,18 @@ class FakeYOLO:
 
     def predict(self, **kwargs):
         self.predict_calls.append(kwargs)
+        self.predictor = kwargs.get('predictor', self.predictor)
         return []
 
 
 class UnavailableTritonYOLO(FakeYOLO):
     def predict(self, **kwargs):
         raise ConnectionError('Triton unavailable')
+
+
+class FakeTritonDetectionPredictor:
+    def __init__(self, **kwargs):
+        self.options = kwargs
 
 
 def import_classifier_with_fakes(capture):
@@ -333,6 +357,9 @@ def import_classifier_with_fakes(capture):
     sys.modules['utils.TranslateObject'] = types.SimpleNamespace(translate=lambda value: value)
     sys.modules['utils.VariableClass'] = types.SimpleNamespace(VariableClass=object)
     sys.modules['utils.ColorDetector'] = types.SimpleNamespace(FindObjectColors=object)
+    sys.modules['utils.TritonDetectionPredictor'] = types.SimpleNamespace(
+        TritonDetectionPredictor=FakeTritonDetectionPredictor
+    )
     sys.modules['utils.ClassificationObject'] = types.SimpleNamespace(ClassificationObject=object)
     sys.modules['utils.AnnotateFrame'] = types.SimpleNamespace(
         annotate_frame=lambda **kwargs: kwargs['frame'],
@@ -371,10 +398,12 @@ class ModelLoadingBackendTest(unittest.TestCase):
         model = self.classifier.load_model(var)
 
         self.assertEqual(model.source, 'http://triton:8000/fake_model')
-        self.assertEqual(model.task, 'segment')
+        self.assertEqual(model.task, 'detect')
         self.assertEqual(model.to_calls, [])
         self.assertEqual(model.predict_calls[0]['data'], 'coco.yaml')
         self.assertEqual(model.predict_calls[0]['imgsz'], 512)
+        self.assertFalse(model.predict_calls[0]['save'])
+        self.assertIsInstance(model.predict_calls[0]['predictor'], FakeTritonDetectionPredictor)
 
     def test_unavailable_triton_fails_model_loading_after_retries(self):
         var = FakeVar()
@@ -391,6 +420,25 @@ class ModelLoadingBackendTest(unittest.TestCase):
 
 
 class ClassifierCleanupTest(unittest.TestCase):
+    def test_worker_paths_are_isolated_by_process_id(self):
+        classifier, _ = import_classifier_with_fakes(FakeVideoCapture(fps=30, frame_count=1))
+        first_worker = FakeVar()
+        second_worker = FakeVar()
+
+        classifier.configure_worker_paths(first_worker, process_id=101)
+        classifier.configure_worker_paths(second_worker, process_id=202)
+
+        path_attributes = (
+            'MEDIA_SAVEPATH',
+            'OUTPUT_MEDIA_SAVEPATH',
+            'BBOX_FRAME_SAVEPATH',
+            'RETURN_JSON_SAVEPATH',
+        )
+        for attribute in path_attributes:
+            self.assertNotEqual(getattr(first_worker, attribute), getattr(second_worker, attribute))
+        self.assertEqual(first_worker.MEDIA_SAVEPATH, '/tmp/input.101.mp4')
+        self.assertEqual(second_worker.OUTPUT_MEDIA_SAVEPATH, '/tmp/output.202.mp4')
+
     def test_triton_failure_discards_partial_predictor(self):
         capture = FakeVideoCapture(fps=30, frame_count=1)
         classifier, _ = import_classifier_with_fakes(capture)
@@ -419,6 +467,24 @@ class ClassifierCleanupTest(unittest.TestCase):
         self.assertTrue(processed)
         self.assertEqual(model.track_calls[0]['data'], 'coco.yaml')
         self.assertEqual(model.track_calls[0]['imgsz'], 512)
+        self.assertNotIn('predictor', model.track_calls[0])
+
+    def test_triton_recreates_missing_detection_predictor(self):
+        capture = FakeVideoCapture(fps=30, frame_count=1)
+        classifier, _ = import_classifier_with_fakes(capture)
+        var = FakeVar()
+        var.INFERENCE_BACKEND = 'triton'
+        model = FakeModel()
+        model.predictor = None
+        model.callbacks = {}
+
+        processed = classifier.process_message(
+            var, model, FakeRabbitMQ(), FakeVault(), {'payload': {'key': 'video'}, 'source': 'vault'}
+        )
+
+        self.assertTrue(processed)
+        self.assertIsInstance(model.track_calls[0]['predictor'], FakeTritonDetectionPredictor)
+        self.assertFalse(model.track_calls[0]['predictor'].options['overrides']['save'])
 
     def test_low_fps_message_releases_capture(self):
         capture = FakeVideoCapture(fps=1, frame_count=1)

@@ -29,6 +29,21 @@ from ultralytics import YOLO
 # torch.backends.nnpack.enabled = False
 
 
+def configure_worker_paths(var, process_id=None):
+    """Give each worker its own local files when multiple processes run."""
+
+    worker_id = os.getpid() if process_id is None else process_id
+    for attribute in (
+            'MEDIA_SAVEPATH',
+            'OUTPUT_MEDIA_SAVEPATH',
+            'BBOX_FRAME_SAVEPATH',
+            'RETURN_JSON_SAVEPATH'):
+        path = getattr(var, attribute, None)
+        if path:
+            path_without_extension, extension = os.path.splitext(path)
+            setattr(var, attribute, f'{path_without_extension}.{worker_id}{extension}')
+
+
 def load_model(var):
     """Load the YOLO model once for the worker process."""
 
@@ -49,11 +64,19 @@ def load_model(var):
         try:
             if inference_backend == 'triton':
                 model = YOLO(model_source, task=var.TRITON_MODEL_TASK)
-                model.predict(
+                predict_options = dict(
                     source=np.zeros((32, 32, 3), dtype=np.uint8),
                     data=var.TRITON_DATA_CONFIG,
                     imgsz=var.INFERENCE_IMAGE_SIZE,
+                    mode='predict',
+                    save=False,
                     verbose=False)
+                if var.TRITON_MODEL_TASK == 'detect':
+                    from utils.TritonDetectionPredictor import TritonDetectionPredictor
+                    predict_options['predictor'] = TritonDetectionPredictor(
+                        overrides=predict_options,
+                        _callbacks=model.callbacks)
+                model.predict(**predict_options)
             else:
                 model = YOLO(model_source)
                 model = model.to(device)
@@ -154,7 +177,7 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
             return False
 
         if var.SAVE_VIDEO:
-            fourcc = cv2.VideoWriter.fourcc(*'avc1')
+            fourcc = cv2.VideoWriter.fourcc(*'mp4v')
             video_out = cv2.VideoWriter(
                 filename=var.OUTPUT_MEDIA_SAVEPATH,
                 fourcc=fourcc,
@@ -207,6 +230,11 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
                     classes=var.ALLOWED_CLASSIFICATIONS)
                 if var.INFERENCE_BACKEND == 'triton':
                     track_options['data'] = var.TRITON_DATA_CONFIG
+                    if var.TRITON_MODEL_TASK == 'detect' and model.predictor is None:
+                        from utils.TritonDetectionPredictor import TritonDetectionPredictor
+                        track_options['predictor'] = TritonDetectionPredictor(
+                            overrides={**track_options, 'mode': 'track', 'save': False},
+                            _callbacks=model.callbacks)
                 try:
                     results = model.track(**track_options)
                 except Exception:
@@ -404,6 +432,7 @@ def ensure_model_loaded(var, rabbitmq, model):
 
 def main():
     var = VariableClass()
+    configure_worker_paths(var)
 
     if var.LOGGING:
         print('a) Initializing RabbitMQ')
