@@ -3,6 +3,15 @@
 # It saves the detected objects in a json file and the annotated video locally.
 # For this it uses the ultralytics package to perform object detection and tracking.
 
+import os
+from dotenv import load_dotenv
+
+
+load_dotenv()
+cpu_threads = os.getenv('CPU_THREADS', '1')
+for thread_variable in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
+    os.environ[thread_variable] = cpu_threads
+
 # Local imports
 from utils.ReturnObject import ReturnJSON
 from utils.TranslateObject import translate
@@ -15,7 +24,6 @@ from utils.kerberos_vault import KerberosVault
 from utils.message_brokers import RabbitMQ
 
 # External imports
-import os
 import cv2
 import time
 import json

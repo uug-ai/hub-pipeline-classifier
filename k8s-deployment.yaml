@@ -49,7 +49,7 @@ spec:
             - name: INFERENCE_BACKEND
               value: "triton"
             - name: TRITON_MODEL_URL
-              value: "http://10.1.5.254:8000/yolov8"
+              value: "http://triton.triton.svc.cluster.local:8000/yolov8_trt"
             - name: TRITON_MODEL_TASK
               value: "detect"
             - name: TRITON_DATA_CONFIG

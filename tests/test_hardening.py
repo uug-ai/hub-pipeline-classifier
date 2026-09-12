@@ -1,4 +1,5 @@
 import importlib
+import os
 import sys
 import types
 import unittest
@@ -385,6 +386,13 @@ class ModelLoadingBackendTest(unittest.TestCase):
         self.classifier, _ = import_classifier_with_fakes(FakeVideoCapture(fps=30, frame_count=1))
         FakeYOLO.instances = []
         self.classifier.YOLO = FakeYOLO
+
+    def test_cpu_threads_configures_native_environment(self):
+        with mock.patch.dict(os.environ, {'CPU_THREADS': '2'}):
+            import_classifier_with_fakes(FakeVideoCapture(fps=30, frame_count=1))
+
+            for variable in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
+                self.assertEqual(os.environ[variable], '2')
 
     def test_configures_native_cpu_thread_pools(self):
         self.classifier.configure_cpu_threads(FakeVar())

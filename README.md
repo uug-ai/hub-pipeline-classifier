@@ -33,7 +33,7 @@ MODEL_NAME="yolov8n-seg.pt"
 
 # Remote inference; tracking and result processing remain in this worker
 INFERENCE_BACKEND="triton"
-TRITON_MODEL_URL="http://10.0.1.24:8000/<model-name>"
+TRITON_MODEL_URL="http://10.0.1.24:30314/<model-name>"
 TRITON_MODEL_TASK="segment"
 TRITON_DATA_CONFIG="coco.yaml"
 INFERENCE_IMAGE_SIZE="512"
@@ -44,7 +44,7 @@ CPU_THREADS="1"
 
 Both raw YOLOv8 detection output (`[batch, 84, anchors]`) and end-to-end YOLO26 output (`[batch, 300, 6]`) are supported. To use the deployed YOLO26 model, set `TRITON_MODEL_URL="http://host:8000/yolo26"` and `TRITON_MODEL_TASK="detect"`.
 
-`CPU_THREADS` limits the PyTorch and OpenCV native thread pools in each worker. Keep it at `1` when running multiple worker processes against Triton to prevent CPU oversubscription.
+`CPU_THREADS` limits the OpenBLAS, OpenMP, NumExpr, PyTorch, and OpenCV thread pools in each worker. Keep it at `1` when running multiple worker processes against Triton to prevent CPU oversubscription.
 
 ### Queue Message Reader
 
