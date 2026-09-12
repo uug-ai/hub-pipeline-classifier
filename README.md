@@ -22,7 +22,40 @@ This repository offers numerous options and additional features to optimally con
 
 YOLOv8 offers a range of models catering to various accuracy-performance trade-offs. Among these, [`yolov8n.pt`](https://docs.ultralytics.com/models/yolov8/#supported-tasks-and-modes) is the most performance-focused, while [`yolov8x.pt`](https://docs.ultralytics.com/models/yolov8/#supported-tasks-and-modes) emphasizes accuracy. Intermediate models such as [`yolov8s`](https://docs.ultralytics.com/models/yolov8/#supported-tasks-and-modes), [`yolov8m`](https://docs.ultralytics.com/models/yolov8/#supported-tasks-and-modes), and [`yolov8l`](https://docs.ultralytics.com/models/yolov8/#supported-tasks-and-modes) progressively balance performance and accuracy. The aforementioned models are **[classification models](https://docs.ultralytics.com/tasks/detect/) only**. Additionally, the object classification supports **[segmentation models](https://docs.ultralytics.com/tasks/segment/)**, which have similar names but include '-seg' (e.g., `yolov8n-seg.pt`). Segmentation models provide the advantage of removing the background and overlapping objects for main color calculation, which will be detailed further in the color prediction feature description.
 
-The utilised model can be altered at `MODEL_NAME` .env variable.
+The utilised local model can be altered with the `MODEL_NAME` environment variable.
+
+Inference can run locally or on an NVIDIA Triton Inference Server:
+
+```dotenv
+# Local CPU/GPU inference (default)
+INFERENCE_BACKEND="local"
+MODEL_NAME="yolov8n-seg.pt"
+
+# Remote inference; tracking and result processing remain in this worker
+INFERENCE_BACKEND="triton"
+TRITON_MODEL_URL="http://10.0.1.24:30314/<model-name>"
+TRITON_MODEL_TASK="segment"
+TRITON_DATA_CONFIG="coco.yaml"
+INFERENCE_IMAGE_SIZE="512"
+TRACKER_CONFIG="bytetrack.yaml"
+VIDEO_DECODER="auto"
+CPU_THREADS="1"
+WORKER_PROCESSES="1"
+```
+
+`TRITON_MODEL_URL` must contain the Triton repository model name as its first path segment; use `http://host:8000/model-name`, not the REST metadata route `http://host:8000/v2/models/model-name`. `TRITON_MODEL_TASK` must match the deployed model, for example `detect` or `segment`. `TRITON_DATA_CONFIG` supplies class names when the Triton model config does not contain Ultralytics metadata. `INFERENCE_IMAGE_SIZE` controls the square inference resolution; smaller values improve throughput but may miss small objects. The Triton model must expose Ultralytics-compatible inputs and outputs. When using Triton in Kubernetes, remove the worker's `nvidia.com/gpu` resource limit so the pod does not reserve an embedded GPU; add it back when selecting local GPU inference.
+
+Both raw YOLOv8 detection output (`[batch, 84, anchors]`) and end-to-end YOLO26 output (`[batch, 300, 6]`) are supported. To use the deployed YOLO26 model, set `TRITON_MODEL_URL="http://host:8000/yolo26"` and `TRITON_MODEL_TASK="detect"`.
+
+`CPU_THREADS` limits the OpenBLAS, OpenMP, NumExpr, PyTorch, and OpenCV thread pools in each worker. Keep it at `1` when running multiple worker processes against Triton to prevent CPU oversubscription.
+
+Triton runs the model forward pass, while video download, H.264 decoding, image preprocessing, tracking, and result postprocessing remain in the worker. The worker grabs every compressed frame required by the codec but only converts frames selected by `CLASSIFICATION_FPS` into images. Keyframe-only decoding is not used because keyframe cadence is source-dependent and is often too sparse for reliable tracking.
+
+`TRACKER_CONFIG` defaults to `bytetrack.yaml`, which avoids the image-based global-motion compensation used by BoT-SORT and substantially reduces worker CPU. Set it to `botsort.yaml` only when camera-motion compensation is required. The deployment default is `CLASSIFICATION_FPS=2`; increasing it improves temporal coverage but proportionally increases frame retrieval, Triton requests, tracking, and postprocessing.
+
+`VIDEO_DECODER=auto` uses FFmpeg NVDEC when a CUDA video device is available and falls back to OpenCV software decoding otherwise. The NVDEC path selects frames on the GPU before transferring BGR images to the worker. The container needs `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` and an `nvidia.com/gpu` allocation. Set `VIDEO_DECODER=nvdec` to fail instead of falling back, or `VIDEO_DECODER=opencv` to force software decoding.
+
+The container starts `WORKER_PROCESSES` independent queue consumers. Kubernetes configures five workers in one pod so they share one GPU allocation for NVDEC. Worker-specific output paths prevent concurrent downloads and generated files from colliding.
 
 ### Queue Message Reader
 
