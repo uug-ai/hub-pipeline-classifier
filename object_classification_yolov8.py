@@ -22,6 +22,7 @@ from utils.AnnotateFrame import annotate_frame, annotate_bbox_frame
 from utils.ClassificationObjectFunctions import create_classification_object, edit_classification_object, find_classification_object
 from utils.kerberos_vault import KerberosVault
 from utils.message_brokers import RabbitMQ
+from utils.VideoFrameReader import VideoReaderError, create_sampled_video_reader
 
 # External imports
 import cv2
@@ -162,7 +163,7 @@ def reset_tracking_state(var, model):
 
 
 def process_message(var, model, rabbitmq, kerberos_vault, message):
-    cap = None
+    video_reader = None
     video_out = None
     bbox_frame = None
 
@@ -187,11 +188,19 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
 
         if var.LOGGING:
             print(f'3) Opening video file: {var.MEDIA_SAVEPATH}')
-        cap = cv2.VideoCapture(var.MEDIA_SAVEPATH)
-        if not cap.isOpened():
+        try:
+            video_reader = create_sampled_video_reader(
+                path=var.MEDIA_SAVEPATH,
+                classification_fps=var.CLASSIFICATION_FPS,
+                max_predictions=var.MAX_NUMBER_OF_PREDICTIONS,
+                decoder=var.VIDEO_DECODER,
+                logging=var.LOGGING)
+        except VideoReaderError as exc:
             if var.LOGGING:
-                print(f'Unable to open video file: {var.MEDIA_SAVEPATH}')
+                print(exc)
             return False
+        if var.LOGGING:
+            print(f'Video decoder: {video_reader.backend}')
 
         if var.SAVE_VIDEO:
             fourcc = cv2.VideoWriter.fourcc(*'mp4v')
@@ -199,8 +208,7 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
                 filename=var.OUTPUT_MEDIA_SAVEPATH,
                 fourcc=fourcc,
                 fps=var.CLASSIFICATION_FPS,
-                frameSize=(int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                           int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+                frameSize=(video_reader.width, video_reader.height)
             )
 
         if var.FIND_DOMINANT_COLORS:
@@ -213,142 +221,126 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
         classification_object_list: list[ClassificationObject] = []
         classification_object_ids: list[int] = []
 
-        frame_number, predicted_frames = 0, 0
-        frame_skip_factor = int(cap.get(cv2.CAP_PROP_FPS) / var.CLASSIFICATION_FPS)
-        if frame_skip_factor <= 0:
-            if var.LOGGING:
-                print('Skipping message because video FPS is lower than CLASSIFICATION_FPS')
-            return False
-
-        max_frame_number = cap.get(cv2.CAP_PROP_FRAME_COUNT)
         if var.LOGGING:
             print('4) Classifying frames')
         if var.TIME_VERBOSE:
             total_time_preprocessing += time.time() - start_time_preprocessing
             start_time_processing = time.time()
 
-        while (predicted_frames < var.MAX_NUMBER_OF_PREDICTIONS) and (frame_number < max_frame_number):
-            if not cap.grab():
-                break
+        predicted_frames = 0
+        for frame_number, frame in video_reader:
+            if var.CREATE_BBOX_FRAME and frame_number == 0:
+                bbox_frame = frame.copy()
 
-            if frame_number % frame_skip_factor == 0:
-                success, frame = cap.retrieve()
-                if not success:
-                    break
-
-                if var.CREATE_BBOX_FRAME and frame_number == 0:
-                    bbox_frame = frame.copy()
-
-                if var.TIME_VERBOSE:
-                    start_time_class_prediction = time.time()
-                track_options = dict(
-                    source=frame,
-                    persist=True,
-                    verbose=False,
-                    conf=var.CLASSIFICATION_THRESHOLD,
-                    imgsz=var.INFERENCE_IMAGE_SIZE,
-                    classes=var.ALLOWED_CLASSIFICATIONS)
+            if var.TIME_VERBOSE:
+                start_time_class_prediction = time.time()
+            track_options = dict(
+                source=frame,
+                persist=True,
+                verbose=False,
+                conf=var.CLASSIFICATION_THRESHOLD,
+                imgsz=var.INFERENCE_IMAGE_SIZE,
+                classes=var.ALLOWED_CLASSIFICATIONS,
+                tracker=var.TRACKER_CONFIG)
+            if var.INFERENCE_BACKEND == 'triton':
+                track_options['data'] = var.TRITON_DATA_CONFIG
+                if var.TRITON_MODEL_TASK == 'detect' and model.predictor is None:
+                    from utils.TritonDetectionPredictor import TritonDetectionPredictor
+                    track_options['predictor'] = TritonDetectionPredictor(
+                        overrides={**track_options, 'mode': 'track', 'save': False},
+                        _callbacks=model.callbacks)
+            try:
+                results = model.track(**track_options)
+            except Exception:
                 if var.INFERENCE_BACKEND == 'triton':
-                    track_options['data'] = var.TRITON_DATA_CONFIG
-                    if var.TRITON_MODEL_TASK == 'detect' and model.predictor is None:
-                        from utils.TritonDetectionPredictor import TritonDetectionPredictor
-                        track_options['predictor'] = TritonDetectionPredictor(
-                            overrides={**track_options, 'mode': 'track', 'save': False},
-                            _callbacks=model.callbacks)
-                try:
-                    results = model.track(**track_options)
-                except Exception:
-                    if var.INFERENCE_BACKEND == 'triton':
-                        model.predictor = None
-                    raise
-                if var.TIME_VERBOSE:
-                    total_time_class_prediction += time.time() - start_time_class_prediction
+                    model.predictor = None
+                raise
+            if var.TIME_VERBOSE:
+                total_time_class_prediction += time.time() - start_time_class_prediction
 
-                if results is not None:
-                    for box, mask in zip(results[0].boxes, results[0].masks or [None] * len(results[0].boxes)):
-                        if box.id is None:
-                            break
+            if results is not None:
+                for box, mask in zip(results[0].boxes, results[0].masks or [None] * len(results[0].boxes)):
+                    if box.id is None:
+                        break
 
-                        object_id = int(box.id)
-                        object_name = translate(results[0].names[int(box.cls)])
-                        object_conf = float(box.conf)
-                        object_trajectory = box.xyxy.tolist()[0]
-                        object_mask = np.int32(
-                            mask.xy[0].tolist()) if mask is not None else None
+                    object_id = int(box.id)
+                    object_name = translate(results[0].names[int(box.cls)])
+                    object_conf = float(box.conf)
+                    object_trajectory = box.xyxy.tolist()[0]
+                    object_mask = np.int32(
+                        mask.xy[0].tolist()) if mask is not None else None
 
-                        if object_id in classification_object_ids:
-                            classification_object = find_classification_object(
-                                classification_object_list, object_id)
+                    if object_id in classification_object_ids:
+                        classification_object = find_classification_object(
+                            classification_object_list, object_id)
 
-                            if var.FIND_DOMINANT_COLORS and classification_object.occurences % var.COLOR_PREDICTION_INTERVAL == 0:
-                                if var.TIME_VERBOSE:
-                                    start_time_color_prediction = time.time()
-                                main_colors_bgr, main_colors_hls, main_colors_str = color_detector.crop_and_detect(
-                                    frame=frame,
-                                    trajectory=object_trajectory,
-                                    mask_polygon=object_mask)
-                                if var.TIME_VERBOSE:
-                                    total_time_color_prediction += time.time() - start_time_color_prediction
-                            else:
-                                main_colors_bgr, main_colors_hls, main_colors_str = None, None, None
-
-                            edit_classification_object(
-                                id=object_id,
-                                object_name=object_name,
-                                object_conf=object_conf,
+                        if var.FIND_DOMINANT_COLORS and classification_object.occurences % var.COLOR_PREDICTION_INTERVAL == 0:
+                            if var.TIME_VERBOSE:
+                                start_time_color_prediction = time.time()
+                            main_colors_bgr, main_colors_hls, main_colors_str = color_detector.crop_and_detect(
+                                frame=frame,
                                 trajectory=object_trajectory,
-                                frame_number=frame_number,
-                                classification_object_list=classification_object_list,
-                                colors_bgr=main_colors_bgr,
-                                colors_hls=main_colors_hls,
-                                colors_str=main_colors_str)
-
+                                mask_polygon=object_mask)
+                            if var.TIME_VERBOSE:
+                                total_time_color_prediction += time.time() - start_time_color_prediction
                         else:
-                            if var.FIND_DOMINANT_COLORS:
-                                if var.TIME_VERBOSE:
-                                    start_time_color_prediction = time.time()
-                                main_colors_bgr, main_colors_hls, main_colors_str = color_detector.crop_and_detect(
-                                    frame=frame,
-                                    trajectory=object_trajectory,
-                                    mask_polygon=object_mask)
-                                if var.TIME_VERBOSE:
-                                    total_time_color_prediction += time.time() - start_time_color_prediction
-                            else:
-                                main_colors_bgr, main_colors_hls, main_colors_str = None, None, None
+                            main_colors_bgr, main_colors_hls, main_colors_str = None, None, None
 
-                            classification_object = create_classification_object(
-                                id=object_id,
-                                first_object_name=object_name,
-                                first_object_conf=object_conf,
-                                first_trajectory=object_trajectory,
-                                first_frame=frame_number,
-                                frame_width=int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                                frame_height=int(
-                                    cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                                first_colors_bgr=main_colors_bgr,
-                                first_colors_hls=main_colors_hls,
-                                first_colors_str=main_colors_str)
+                        edit_classification_object(
+                            id=object_id,
+                            object_name=object_name,
+                            object_conf=object_conf,
+                            trajectory=object_trajectory,
+                            frame_number=frame_number,
+                            classification_object_list=classification_object_list,
+                            colors_bgr=main_colors_bgr,
+                            colors_hls=main_colors_hls,
+                            colors_str=main_colors_str)
 
-                            classification_object_ids.append(object_id)
-                            classification_object_list.append(
-                                classification_object)
+                    else:
+                        if var.FIND_DOMINANT_COLORS:
+                            if var.TIME_VERBOSE:
+                                start_time_color_prediction = time.time()
+                            main_colors_bgr, main_colors_hls, main_colors_str = color_detector.crop_and_detect(
+                                frame=frame,
+                                trajectory=object_trajectory,
+                                mask_polygon=object_mask)
+                            if var.TIME_VERBOSE:
+                                total_time_color_prediction += time.time() - start_time_color_prediction
+                        else:
+                            main_colors_bgr, main_colors_hls, main_colors_str = None, None, None
 
-                if var.SAVE_VIDEO or var.PLOT:
-                    annotated_frame = annotate_frame(
-                        frame=frame,
-                        frame_number=frame_number,
-                        classification_object_list=classification_object_list,
-                        min_distance=var.MIN_DISTANCE,
-                        min_detections=var.MIN_DETECTIONS)
+                        classification_object = create_classification_object(
+                            id=object_id,
+                            first_object_name=object_name,
+                            first_object_conf=object_conf,
+                            first_trajectory=object_trajectory,
+                            first_frame=frame_number,
+                            frame_width=video_reader.width,
+                            frame_height=video_reader.height,
+                            first_colors_bgr=main_colors_bgr,
+                            first_colors_hls=main_colors_hls,
+                            first_colors_str=main_colors_str)
 
-                    cv2.imshow("YOLOv8 Tracking",
-                               annotated_frame) if var.PLOT else None
-                    cv2.waitKey(1) if var.PLOT else None
+                        classification_object_ids.append(object_id)
+                        classification_object_list.append(
+                            classification_object)
 
-                    video_out.write(annotated_frame) if var.SAVE_VIDEO else None
+            if var.SAVE_VIDEO or var.PLOT:
+                annotated_frame = annotate_frame(
+                    frame=frame,
+                    frame_number=frame_number,
+                    classification_object_list=classification_object_list,
+                    min_distance=var.MIN_DISTANCE,
+                    min_detections=var.MIN_DETECTIONS)
 
-                predicted_frames += 1
-            frame_number += 1
+                cv2.imshow("YOLOv8 Tracking",
+                           annotated_frame) if var.PLOT else None
+                cv2.waitKey(1) if var.PLOT else None
+
+                video_out.write(annotated_frame) if var.SAVE_VIDEO else None
+
+            predicted_frames += 1
 
         if var.TIME_VERBOSE:
             total_time_processing += time.time() - start_time_processing
@@ -400,7 +392,7 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
                 print('Published classification result to RabbitMQ')
 
         if var.TIME_VERBOSE:
-            fps = cap.get(cv2.CAP_PROP_FPS)
+            fps = video_reader.fps
             print(
                 f'\t - Classification took: {round(time.time() - start_time, 1)} seconds, @ {var.CLASSIFICATION_FPS} fps.')
             print(
@@ -415,8 +407,8 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
                 f'\t\t\t - {round(total_time_processing - total_time_class_prediction - total_time_color_prediction, 2)}s for other processing')
             print(
                 f'\t\t - {round(total_time_postprocessing, 2)}s for postprocessing')
-            duration_seconds = cap.get(cv2.CAP_PROP_FRAME_COUNT) / fps if fps else 0
-            print(f'\t - Original video: {round(duration_seconds, 1)} seconds, @ {round(fps, 1)} fps @ {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}. File size of {round(os.path.getsize(var.MEDIA_SAVEPATH)/1024**2, 1)} MB')
+            duration_seconds = video_reader.frame_count / fps if fps else 0
+            print(f'\t - Original video: {round(duration_seconds, 1)} seconds, @ {round(fps, 1)} fps @ {video_reader.width}x{video_reader.height}. File size of {round(os.path.getsize(var.MEDIA_SAVEPATH)/1024**2, 1)} MB')
 
         if var.LOGGING:
             print('Finished processing message')
@@ -426,8 +418,8 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
             print('8) Releasing video writer and closing video capture')
         if video_out is not None:
             video_out.release()
-        if cap is not None:
-            cap.release()
+        if video_reader is not None:
+            video_reader.close()
         cv2.destroyAllWindows()
         rabbitmq.process_data_events()
         if var.LOGGING:

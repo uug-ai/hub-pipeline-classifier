@@ -20,7 +20,8 @@ spec:
           resources:
             limits:
               cpu: 2
-              memory: 2Gi
+              memory: 4Gi
+              nvidia.com/gpu: 1
           env: 
             # Queue parameters
             - name: QUEUE_NAME
@@ -56,8 +57,16 @@ spec:
               value: "coco.yaml"
             - name: INFERENCE_IMAGE_SIZE
               value: "512"
+            - name: TRACKER_CONFIG
+              value: "bytetrack.yaml"
+            - name: VIDEO_DECODER
+              value: "auto"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,utility,video"
             - name: CPU_THREADS
               value: "1"
+            - name: WORKER_PROCESSES
+              value: "5"
             - name: MEDIA_SAVEPATH
               value: "/ml/data/input/video.mp4"
 
@@ -88,7 +97,7 @@ spec:
               value: "True"
 
             - name: CLASSIFICATION_FPS
-              value: "3"
+              value: "2"
             - name: CLASSIFICATION_THRESHOLD
               value: "0.3"
             - name: MIN_DETECTIONS

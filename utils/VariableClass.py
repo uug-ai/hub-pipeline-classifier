@@ -23,6 +23,8 @@ class VariableClass:
         self.TRITON_MODEL_TASK = os.getenv("TRITON_MODEL_TASK", "segment").strip().lower()
         self.TRITON_DATA_CONFIG = os.getenv("TRITON_DATA_CONFIG", "coco.yaml").strip()
         self.INFERENCE_IMAGE_SIZE = int(os.getenv("INFERENCE_IMAGE_SIZE", "640"))
+        self.TRACKER_CONFIG = os.getenv("TRACKER_CONFIG", "bytetrack.yaml").strip()
+        self.VIDEO_DECODER = os.getenv("VIDEO_DECODER", "auto").strip().lower()
         self.CPU_THREADS = int(os.getenv("CPU_THREADS", "1"))
         self.MEDIA_SAVEPATH = os.getenv("MEDIA_SAVEPATH")
 

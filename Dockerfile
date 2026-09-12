@@ -9,7 +9,7 @@ ADD https://github.com/ultralytics/assets/releases/download/v0.0.0/Arial.ttf \
     
 # Install linux packages and clean up (clean-up added, last line)
 RUN apt-get update && apt-get install --no-install-recommends -y \
-    python3-pip git zip curl htop libgl1 libglib2.0-0 libpython3-dev gnupg g++ libusb-1.0-0 && \
+    python3-pip git zip curl ffmpeg htop libgl1 libglib2.0-0 libpython3-dev gnupg g++ libusb-1.0-0 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Create working directory
@@ -49,7 +49,10 @@ ENV TRITON_MODEL_URL ""
 ENV TRITON_MODEL_TASK "segment"
 ENV TRITON_DATA_CONFIG "coco.yaml"
 ENV INFERENCE_IMAGE_SIZE "640"
+ENV TRACKER_CONFIG "bytetrack.yaml"
+ENV VIDEO_DECODER "auto"
 ENV CPU_THREADS "1"
+ENV WORKER_PROCESSES "1"
 
 # Queue parameters
 ENV QUEUE_NAME "" 
@@ -87,7 +90,7 @@ ENV MIN_CLUSTERS "3"
 ENV MAX_CLUSTERS "3"
 
 # Classification parameters
-ENV CLASSIFICATION_FPS "3"
+ENV CLASSIFICATION_FPS "2"
 ENV CLASSIFICATION_THRESHOLD ""
 ENV MAX_NUMBER_OF_PREDICTIONS ""
 ENV MIN_DISTANCE ""
@@ -97,6 +100,6 @@ ENV ALLOWED_CLASSIFICATIONS "0, 1, 2, 3, 5, 7, 14, 15, 16, 24, 26, 28"
 
 
 # Run the application
-ENTRYPOINT ["python" , "object_classification_yolov8.py"]
+ENTRYPOINT ["python", "worker_launcher.py"]
 
 

@@ -249,6 +249,8 @@ class FakeVar:
     TRITON_MODEL_TASK = 'detect'
     TRITON_DATA_CONFIG = 'coco.yaml'
     INFERENCE_IMAGE_SIZE = 512
+    TRACKER_CONFIG = 'bytetrack.yaml'
+    VIDEO_DECODER = 'opencv'
     CPU_THREADS = 1
     QUEUE_NAME = 'source'
     QUEUE_EXCHANGE = ''
@@ -383,6 +385,7 @@ def import_classifier_with_fakes(capture):
     )
     sys.modules['utils.kerberos_vault'] = types.SimpleNamespace(KerberosVault=object)
     sys.modules['utils.message_brokers'] = types.SimpleNamespace(RabbitMQ=object)
+    sys.modules.pop('utils.VideoFrameReader', None)
     sys.modules.pop('object_classification_yolov8', None)
     module = importlib.import_module('object_classification_yolov8')
     return module, fake_cv2
@@ -491,6 +494,7 @@ class ClassifierCleanupTest(unittest.TestCase):
         self.assertTrue(processed)
         self.assertEqual(model.track_calls[0]['data'], 'coco.yaml')
         self.assertEqual(model.track_calls[0]['imgsz'], 512)
+        self.assertEqual(model.track_calls[0]['tracker'], 'bytetrack.yaml')
         self.assertNotIn('predictor', model.track_calls[0])
 
     def test_skipped_frames_are_not_retrieved(self):
