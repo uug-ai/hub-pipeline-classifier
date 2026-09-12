@@ -70,6 +70,8 @@ class VideoFrameReaderTest(unittest.TestCase):
         command = reader._command()
         video_filter = command[command.index('-vf') + 1]
         self.assertEqual(reader.frame_skip_factor, 17)
+        self.assertEqual(command[command.index('-c:v') + 1], 'h264_cuvid')
+        self.assertEqual(command[command.index('-hwaccel_output_format') + 1], 'cuda')
         self.assertIn('select=not(mod(n\\,17))', video_filter)
         self.assertIn('hwdownload', video_filter)
         self.assertEqual(command[command.index('-frames:v') + 1], '100')
