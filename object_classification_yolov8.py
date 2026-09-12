@@ -228,14 +228,17 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
             start_time_processing = time.time()
 
         while (predicted_frames < var.MAX_NUMBER_OF_PREDICTIONS) and (frame_number < max_frame_number):
-            success, frame = cap.read()
-            if not success:
+            if not cap.grab():
                 break
 
-            if var.CREATE_BBOX_FRAME and frame_number == 0:
-                bbox_frame = frame.copy()
-
             if frame_number % frame_skip_factor == 0:
+                success, frame = cap.retrieve()
+                if not success:
+                    break
+
+                if var.CREATE_BBOX_FRAME and frame_number == 0:
+                    bbox_frame = frame.copy()
+
                 if var.TIME_VERBOSE:
                     start_time_class_prediction = time.time()
                 track_options = dict(

@@ -159,7 +159,8 @@ class FakeVideoCapture:
         self.fps = fps
         self.frame_count = frame_count
         self.released = False
-        self.read_count = 0
+        self.grab_count = 0
+        self.retrieve_count = 0
 
     def isOpened(self):
         return True
@@ -173,11 +174,17 @@ class FakeVideoCapture:
             return 640
         return 0
 
-    def read(self):
-        if self.read_count < self.frame_count:
-            self.read_count += 1
-            return True, FakeFrame()
-        return False, None
+    def grab(self):
+        if self.grab_count >= self.frame_count:
+            return False
+        self.grab_count += 1
+        return True
+
+    def retrieve(self):
+        if self.grab_count == 0 or self.grab_count > self.frame_count:
+            return False, None
+        self.retrieve_count += 1
+        return True, FakeFrame()
 
     def release(self):
         self.released = True
@@ -485,6 +492,20 @@ class ClassifierCleanupTest(unittest.TestCase):
         self.assertEqual(model.track_calls[0]['data'], 'coco.yaml')
         self.assertEqual(model.track_calls[0]['imgsz'], 512)
         self.assertNotIn('predictor', model.track_calls[0])
+
+    def test_skipped_frames_are_not_retrieved(self):
+        capture = FakeVideoCapture(fps=30, frame_count=20)
+        classifier, _ = import_classifier_with_fakes(capture)
+        var = FakeVar()
+        var.MAX_NUMBER_OF_PREDICTIONS = 2
+
+        processed = classifier.process_message(
+            var, FakeModel(), FakeRabbitMQ(), FakeVault(), {'payload': {'key': 'video'}, 'source': 'vault'}
+        )
+
+        self.assertTrue(processed)
+        self.assertEqual(capture.grab_count, 11)
+        self.assertEqual(capture.retrieve_count, 2)
 
     def test_triton_recreates_missing_detection_predictor(self):
         capture = FakeVideoCapture(fps=30, frame_count=1)

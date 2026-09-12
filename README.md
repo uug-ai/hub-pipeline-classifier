@@ -46,6 +46,8 @@ Both raw YOLOv8 detection output (`[batch, 84, anchors]`) and end-to-end YOLO26 
 
 `CPU_THREADS` limits the OpenBLAS, OpenMP, NumExpr, PyTorch, and OpenCV thread pools in each worker. Keep it at `1` when running multiple worker processes against Triton to prevent CPU oversubscription.
 
+Triton runs the model forward pass, while video download, H.264 decoding, image preprocessing, tracking, and result postprocessing remain in the worker. The worker grabs every compressed frame required by the codec but only converts frames selected by `CLASSIFICATION_FPS` into images. Keyframe-only decoding is not used because keyframe cadence is source-dependent and is often too sparse for reliable tracking.
+
 ### Queue Message Reader
 
 The object classification system will automatically check for incoming messages and process them. If there is a queue build-up, it will continue to process media until the queue is empty. This functionality leverages the [`uugai-python-dynamic-queue`](https://pypi.org/project/uugai-python-dynamic-queue/) dependency. More information can be found in the corresponding [GitHub repository](https://github.com/uug-ai/uugai-python-dynamic-queue). Initialization is straightforward, as demonstrated in the code snippet below, which also lists the corresponding .env variables.
