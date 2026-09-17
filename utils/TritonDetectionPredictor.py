@@ -1,11 +1,21 @@
+from urllib.parse import urlparse
+
 import torch
 from ultralytics.engine.results import Results
 from ultralytics.models.yolo.detect.predict import DetectionPredictor
 from ultralytics.utils import ops
 
+from utils.TritonHTTPTransport import TritonHTTPTransport
+
 
 class TritonDetectionPredictor(DetectionPredictor):
     """Post-process raw YOLO outputs and end-to-end Triton detections."""
+
+    def setup_model(self, model, verbose=True):
+        super().setup_model(model, verbose=verbose)
+        if self.model.triton and urlparse(str(model)).scheme == 'http':
+            remote_model = self.model.model
+            remote_model.triton_client = TritonHTTPTransport(remote_model.triton_client)
 
     def postprocess(self, preds, img, orig_imgs):
         prediction = preds[0] if isinstance(preds, (list, tuple)) else preds

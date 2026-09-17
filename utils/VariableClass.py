@@ -24,6 +24,22 @@ class VariableClass:
         self.TRITON_DATA_CONFIG = os.getenv("TRITON_DATA_CONFIG", "coco.yaml").strip()
         self.INFERENCE_IMAGE_SIZE = int(os.getenv("INFERENCE_IMAGE_SIZE", "640"))
         self.TRACKER_CONFIG = os.getenv("TRACKER_CONFIG", "bytetrack.yaml").strip()
+        tracker_reid_enabled = os.getenv("TRACKER_REID_ENABLED", "False").strip().lower()
+        if tracker_reid_enabled not in {'true', 'false'}:
+            raise ValueError('TRACKER_REID_ENABLED must be True or False')
+        self.TRACKER_REID_ENABLED = tracker_reid_enabled == 'true'
+        self.TRACKER_REID_BACKEND = os.getenv("TRACKER_REID_BACKEND", "local").strip().lower()
+        if self.TRACKER_REID_BACKEND not in {'local', 'triton'}:
+            raise ValueError('TRACKER_REID_BACKEND must be local or triton')
+        self.TRITON_REID_URL = os.getenv("TRITON_REID_URL", "").strip()
+        self.TRITON_REID_IMAGE_SIZE = int(os.getenv("TRITON_REID_IMAGE_SIZE", "224"))
+        self.TRITON_REID_BATCH_SIZE = int(os.getenv("TRITON_REID_BATCH_SIZE", "16"))
+        self.TRITON_REID_TIMEOUT = float(os.getenv("TRITON_REID_TIMEOUT", "10"))
+        self.TRACKER_REID_MODEL = os.getenv("TRACKER_REID_MODEL", "yolo11n-cls.pt").strip()
+        self.TRACKER_PROXIMITY_THRESH = float(os.getenv("TRACKER_PROXIMITY_THRESH", "0.5"))
+        self.TRACKER_APPEARANCE_THRESH = float(os.getenv("TRACKER_APPEARANCE_THRESH", "0.8"))
+        self.TRACKER_BUFFER = int(os.getenv("TRACKER_BUFFER", "30"))
+        self.TRACKER_GMC_METHOD = os.getenv("TRACKER_GMC_METHOD", "none").strip()
         self.VIDEO_DECODER = os.getenv("VIDEO_DECODER", "auto").strip().lower()
         self.CPU_THREADS = int(os.getenv("CPU_THREADS", "1"))
         self.MEDIA_SAVEPATH = os.getenv("MEDIA_SAVEPATH")
