@@ -5,6 +5,8 @@ import types
 import unittest
 from unittest import mock
 
+import yaml
+
 
 class FakeAMQPError(Exception):
     pass
@@ -250,6 +252,13 @@ class FakeVar:
     TRITON_DATA_CONFIG = 'coco.yaml'
     INFERENCE_IMAGE_SIZE = 512
     TRACKER_CONFIG = 'bytetrack.yaml'
+    TRACKER_REID_ENABLED = False
+    TRACKER_REID_BACKEND = 'local'
+    TRACKER_REID_MODEL = 'yolo11n-cls.pt'
+    TRACKER_PROXIMITY_THRESH = 0.5
+    TRACKER_APPEARANCE_THRESH = 0.8
+    TRACKER_BUFFER = 30
+    TRACKER_GMC_METHOD = 'none'
     VIDEO_DECODER = 'opencv'
     CPU_THREADS = 1
     QUEUE_NAME = 'source'
@@ -430,7 +439,7 @@ class ModelLoadingBackendTest(unittest.TestCase):
         self.assertEqual(model.predict_calls[0]['data'], 'coco.yaml')
         self.assertEqual(model.predict_calls[0]['imgsz'], 512)
         self.assertFalse(model.predict_calls[0]['save'])
-        self.assertIsInstance(model.predict_calls[0]['predictor'], FakeTritonDetectionPredictor)
+        self.assertIs(model.predict_calls[0]['predictor'], FakeTritonDetectionPredictor)
 
     def test_unavailable_triton_fails_model_loading_after_retries(self):
         var = FakeVar()
@@ -447,6 +456,85 @@ class ModelLoadingBackendTest(unittest.TestCase):
 
 
 class ClassifierCleanupTest(unittest.TestCase):
+    def test_verbose_timing_separates_detector_and_reid_requests(self):
+        classifier, _ = import_classifier_with_fakes(FakeVideoCapture(fps=30, frame_count=1))
+        var = FakeVar()
+        var.TIME_VERBOSE = True
+        var.INFERENCE_BACKEND = 'triton'
+        var.TRACKER_REID_ENABLED = True
+        var.TRACKER_REID_BACKEND = 'triton'
+        model = FakeModel()
+        model.predictor.trackers[0].encoder = types.SimpleNamespace(request_seconds=0.02, request_count=1)
+        remote_track = mock.Mock(return_value=[types.SimpleNamespace(
+            boxes=[], masks=None, names={}, speed={'inference': 25.0})])
+        with mock.patch.dict(sys.modules, {
+                'utils.TritonReIDTracking': types.SimpleNamespace(track_with_triton_reid=remote_track)}), \
+                mock.patch.object(classifier.os.path, 'getsize', return_value=0), \
+                mock.patch('builtins.print') as output:
+            self.assertTrue(classifier.process_message(var, model, FakeRabbitMQ(), FakeVault(), {}))
+        messages = '\n'.join(str(call.args[0]) for call in output.call_args_list)
+        self.assertIn('Processed 1 sampled frames', messages)
+        self.assertIn('detection + ReID + tracking (including network)', messages)
+        self.assertIn('0.03s for detector client calls', messages)
+        self.assertIn('0.02s for 1 ReID HTTP requests', messages)
+
+    def test_triton_reid_route_preserves_detector_options_and_handles_failure(self):
+        for should_fail in (False, True):
+            with self.subTest(should_fail=should_fail):
+                capture = FakeVideoCapture(fps=30, frame_count=1)
+                classifier, _ = import_classifier_with_fakes(capture)
+                var = FakeVar()
+                var.INFERENCE_BACKEND = 'triton'
+                var.TRACKER_REID_ENABLED = True
+                var.TRACKER_REID_BACKEND = 'triton'
+                model = FakeModel()
+                remote_track = mock.Mock(return_value=[types.SimpleNamespace(boxes=[], masks=None, names={})])
+                if should_fail:
+                    remote_track.side_effect = ConnectionError('ReID unavailable')
+                with mock.patch.dict(sys.modules, {
+                        'utils.TritonReIDTracking': types.SimpleNamespace(track_with_triton_reid=remote_track)}):
+                    if should_fail:
+                        with self.assertRaisesRegex(ConnectionError, 'ReID unavailable'):
+                            classifier.process_message(var, model, FakeRabbitMQ(), FakeVault(), {})
+                        self.assertIsNone(model.predictor)
+                    else:
+                        self.assertTrue(classifier.process_message(var, model, FakeRabbitMQ(), FakeVault(), {}))
+                        self.assertEqual(model.predictor.trackers[0].reset_calls, 1)
+                self.assertEqual(model.track_calls, [])
+                self.assertTrue(capture.released)
+                remote_track.assert_called_once()
+                self.assertEqual(remote_track.call_args.args, (var, model))
+                self.assertEqual(remote_track.call_args.kwargs['conf'], var.CLASSIFICATION_THRESHOLD)
+                self.assertEqual(remote_track.call_args.kwargs['imgsz'], var.INFERENCE_IMAGE_SIZE)
+                self.assertEqual(remote_track.call_args.kwargs['data'], var.TRITON_DATA_CONFIG)
+
+    def test_appearance_tracking_config_reaches_local_and_triton_models(self):
+        for backend in ('local', 'triton'):
+            with self.subTest(backend=backend):
+                classifier, _ = import_classifier_with_fakes(FakeVideoCapture(fps=30, frame_count=1))
+                var = FakeVar()
+                var.INFERENCE_BACKEND = backend
+                var.TRACKER_REID_ENABLED = True
+                model = FakeModel()
+                configs = []
+
+                def track(model=model, configs=configs, **kwargs):
+                    with open(kwargs['tracker'], encoding='utf-8') as config_file:
+                        configs.append(yaml.safe_load(config_file))
+                    return FakeModel.track(model, **kwargs)
+
+                with mock.patch.object(model, 'track', side_effect=track):
+                    processed = classifier.process_message(var, model, FakeRabbitMQ(), FakeVault(), {})
+
+                self.assertTrue(processed)
+                self.assertTrue(configs[0]['with_reid'])
+                self.assertEqual(configs[0]['tracker_type'], 'botsort')
+                self.assertEqual(configs[0]['model'], 'yolo11n-cls.pt')
+                self.assertEqual(model.track_calls[0]['conf'], var.CLASSIFICATION_THRESHOLD)
+                self.assertEqual(model.track_calls[0]['imgsz'], var.INFERENCE_IMAGE_SIZE)
+                self.assertFalse(os.path.exists(model.track_calls[0]['tracker']))
+                self.assertEqual(model.predictor.trackers[0].reset_calls, 1)
+
     def test_worker_paths_are_isolated_by_process_id(self):
         classifier, _ = import_classifier_with_fakes(FakeVideoCapture(fps=30, frame_count=1))
         first_worker = FakeVar()
@@ -494,7 +582,7 @@ class ClassifierCleanupTest(unittest.TestCase):
         self.assertTrue(processed)
         self.assertEqual(model.track_calls[0]['data'], 'coco.yaml')
         self.assertEqual(model.track_calls[0]['imgsz'], 512)
-        self.assertEqual(model.track_calls[0]['tracker'], 'bytetrack.yaml')
+        self.assertTrue(model.track_calls[0]['tracker'].endswith('/trackers/bytetrack.yaml'))
         self.assertNotIn('predictor', model.track_calls[0])
 
     def test_skipped_frames_are_not_retrieved(self):
@@ -525,8 +613,8 @@ class ClassifierCleanupTest(unittest.TestCase):
         )
 
         self.assertTrue(processed)
-        self.assertIsInstance(model.track_calls[0]['predictor'], FakeTritonDetectionPredictor)
-        self.assertFalse(model.track_calls[0]['predictor'].options['overrides']['save'])
+        self.assertIs(model.track_calls[0]['predictor'], FakeTritonDetectionPredictor)
+        self.assertFalse(model.track_calls[0]['save'])
 
     def test_low_fps_message_releases_capture(self):
         capture = FakeVideoCapture(fps=1, frame_count=1)

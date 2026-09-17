@@ -17,8 +17,8 @@ WORKDIR /usr/src/ultralytics
 
 # Clone the repository
 RUN git clone https://github.com/ultralytics/ultralytics /usr/src/ultralytics
-# Checkout tag v8.1.0
-RUN cd /usr/src/ultralytics && git checkout v8.1.0
+# Match the version installed from requirements.txt
+RUN cd /usr/src/ultralytics && git checkout v8.3.203
 
 # Add yolov8n.pt model
 ADD https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.pt /usr/src/ultralytics/
@@ -50,6 +50,17 @@ ENV TRITON_MODEL_TASK "segment"
 ENV TRITON_DATA_CONFIG "coco.yaml"
 ENV INFERENCE_IMAGE_SIZE "640"
 ENV TRACKER_CONFIG "bytetrack.yaml"
+ENV TRACKER_REID_ENABLED "False"
+ENV TRACKER_REID_BACKEND "local"
+ENV TRITON_REID_URL ""
+ENV TRITON_REID_IMAGE_SIZE "224"
+ENV TRITON_REID_BATCH_SIZE "16"
+ENV TRITON_REID_TIMEOUT "10"
+ENV TRACKER_REID_MODEL "yolo11n-cls.pt"
+ENV TRACKER_PROXIMITY_THRESH "0.5"
+ENV TRACKER_APPEARANCE_THRESH "0.8"
+ENV TRACKER_BUFFER "30"
+ENV TRACKER_GMC_METHOD "none"
 ENV VIDEO_DECODER "auto"
 ENV CPU_THREADS "1"
 ENV WORKER_PROCESSES "1"

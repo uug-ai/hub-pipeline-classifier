@@ -1,4 +1,5 @@
 import types
+import os
 import unittest
 from unittest import mock
 
@@ -7,9 +8,21 @@ import torch
 from ultralytics.models.yolo.detect.predict import DetectionPredictor
 
 from utils.TritonDetectionPredictor import TritonDetectionPredictor
+from utils.TritonHTTPTransport import TritonHTTPTransport
 
 
 class TritonDetectionPredictorTest(unittest.TestCase):
+    def test_http_backend_receives_compression_without_changing_model(self):
+        client = mock.Mock()
+        self.predictor.model = types.SimpleNamespace(
+            triton=True, model=types.SimpleNamespace(triton_client=client))
+        with mock.patch.object(DetectionPredictor, 'setup_model'), \
+                mock.patch.dict(os.environ, {'TRITON_HTTP_COMPRESSION': 'gzip'}):
+            self.predictor.setup_model('http://triton:8000/detector', verbose=False)
+        self.assertIsInstance(self.predictor.model.model.triton_client, TritonHTTPTransport)
+        self.predictor.model.model.triton_client.infer('detector')
+        self.assertEqual(client.infer.call_args.kwargs['request_compression_algorithm'], 'gzip')
+
     def setUp(self):
         self.predictor = object.__new__(TritonDetectionPredictor)
         self.predictor.args = types.SimpleNamespace(conf=0.5, classes=[0], max_det=300)

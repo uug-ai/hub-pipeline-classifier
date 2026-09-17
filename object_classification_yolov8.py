@@ -23,6 +23,7 @@ from utils.ClassificationObjectFunctions import create_classification_object, ed
 from utils.kerberos_vault import KerberosVault
 from utils.message_brokers import RabbitMQ
 from utils.VideoFrameReader import VideoReaderError, create_sampled_video_reader
+from utils.TrackingConfig import tracking_config
 
 # External imports
 import cv2
@@ -86,14 +87,13 @@ def load_model(var):
                     source=np.zeros((32, 32, 3), dtype=np.uint8),
                     data=var.TRITON_DATA_CONFIG,
                     imgsz=var.INFERENCE_IMAGE_SIZE,
+                    device='cpu',
                     mode='predict',
                     save=False,
                     verbose=False)
                 if var.TRITON_MODEL_TASK == 'detect':
                     from utils.TritonDetectionPredictor import TritonDetectionPredictor
-                    predict_options['predictor'] = TritonDetectionPredictor(
-                        overrides=predict_options,
-                        _callbacks=model.callbacks)
+                    predict_options['predictor'] = TritonDetectionPredictor
                 model.predict(**predict_options)
             else:
                 model = YOLO(model_source)
@@ -153,6 +153,9 @@ def reset_tracking_state(var, model):
         reset = getattr(tracker, 'reset', None)
         if callable(reset):
             reset()
+        reset_stats = getattr(getattr(tracker, 'encoder', None), 'reset_stats', None)
+        if callable(reset_stats):
+            reset_stats()
 
     vid_path = getattr(predictor, 'vid_path', None)
     if isinstance(vid_path, list):
@@ -163,6 +166,11 @@ def reset_tracking_state(var, model):
 
 
 def process_message(var, model, rabbitmq, kerberos_vault, message):
+    with tracking_config(var) as tracker_path:
+        return _process_video_message(var, model, rabbitmq, kerberos_vault, message, tracker_path)
+
+
+def _process_video_message(var, model, rabbitmq, kerberos_vault, message, tracker_path):
     video_reader = None
     video_out = None
     bbox_frame = None
@@ -181,6 +189,7 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
             start_time = time.time()
             total_time_preprocessing = 0
             total_time_class_prediction = 0
+            total_time_detector_request = 0
             total_time_color_prediction = 0
             total_time_processing = 0
             total_time_postprocessing = 0
@@ -241,22 +250,27 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
                 conf=var.CLASSIFICATION_THRESHOLD,
                 imgsz=var.INFERENCE_IMAGE_SIZE,
                 classes=var.ALLOWED_CLASSIFICATIONS,
-                tracker=var.TRACKER_CONFIG)
+                tracker=tracker_path)
             if var.INFERENCE_BACKEND == 'triton':
                 track_options['data'] = var.TRITON_DATA_CONFIG
                 if var.TRITON_MODEL_TASK == 'detect' and model.predictor is None:
                     from utils.TritonDetectionPredictor import TritonDetectionPredictor
-                    track_options['predictor'] = TritonDetectionPredictor(
-                        overrides={**track_options, 'mode': 'track', 'save': False},
-                        _callbacks=model.callbacks)
+                    track_options['predictor'] = TritonDetectionPredictor
+                    track_options['save'] = False
             try:
-                results = model.track(**track_options)
+                if var.TRACKER_REID_ENABLED and var.TRACKER_REID_BACKEND == 'triton':
+                    from utils.TritonReIDTracking import track_with_triton_reid
+                    results = track_with_triton_reid(var, model, **track_options)
+                else:
+                    results = model.track(**track_options)
             except Exception:
                 if var.INFERENCE_BACKEND == 'triton':
                     model.predictor = None
                 raise
             if var.TIME_VERBOSE:
                 total_time_class_prediction += time.time() - start_time_class_prediction
+                if results:
+                    total_time_detector_request += ((getattr(results[0], 'speed', None) or {}).get('inference') or 0) / 1000
 
             if results is not None:
                 for box, mask in zip(results[0].boxes, results[0].masks or [None] * len(results[0].boxes)):
@@ -395,12 +409,21 @@ def process_message(var, model, rabbitmq, kerberos_vault, message):
             fps = video_reader.fps
             print(
                 f'\t - Classification took: {round(time.time() - start_time, 1)} seconds, @ {var.CLASSIFICATION_FPS} fps.')
+            print(f'\t\t - Processed {predicted_frames} sampled frames')
             print(
                 f'\t\t - {round(total_time_preprocessing, 2)}s for preprocessing and initialisation')
             print(
                 f'\t\t - {round(total_time_processing, 2)}s for processing of which:')
             print(
-                f'\t\t\t - {round(total_time_class_prediction, 2)}s for class prediction')
+                f'\t\t\t - {round(total_time_class_prediction, 2)}s for detection + ReID + tracking (including network)')
+            if var.INFERENCE_BACKEND == 'triton':
+                print(f'\t\t\t   - {round(total_time_detector_request, 2)}s for detector client calls (transfer + server, not GPU-only)')
+            if var.TRACKER_REID_ENABLED and var.TRACKER_REID_BACKEND == 'triton':
+                predictor = getattr(model, 'predictor', None)
+                for tracker in getattr(predictor, 'trackers', []):
+                    encoder = getattr(tracker, 'encoder', None)
+                    if encoder is not None:
+                        print(f'\t\t\t   - {encoder.request_seconds:.2f}s for {encoder.request_count} ReID HTTP requests (included above)')
             print(
                 f'\t\t\t - {round(total_time_color_prediction, 2)}s for color prediction')
             print(

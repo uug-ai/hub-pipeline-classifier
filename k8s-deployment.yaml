@@ -21,7 +21,6 @@ spec:
             limits:
               cpu: 2
               memory: 4Gi
-              nvidia.com/gpu: 1
           env: 
             # Queue parameters
             - name: QUEUE_NAME
@@ -59,10 +58,30 @@ spec:
               value: "512"
             - name: TRACKER_CONFIG
               value: "bytetrack.yaml"
+            - name: TRACKER_REID_ENABLED
+              value: "True"
+            - name: TRACKER_REID_BACKEND
+              value: "triton"
+            - name: TRITON_REID_URL
+              value: "http://triton.triton.svc.cluster.local:8000/yolo11n_reid"
+            - name: TRITON_REID_IMAGE_SIZE
+              value: "224"
+            - name: TRITON_REID_BATCH_SIZE
+              value: "16"
+            - name: TRITON_REID_TIMEOUT
+              value: "10"
+            - name: TRACKER_REID_MODEL
+              value: "yolo11n-cls.pt"
+            - name: TRACKER_PROXIMITY_THRESH
+              value: "0.5"
+            - name: TRACKER_APPEARANCE_THRESH
+              value: "0.8"
+            - name: TRACKER_BUFFER
+              value: "30"
+            - name: TRACKER_GMC_METHOD
+              value: "none"
             - name: VIDEO_DECODER
-              value: "auto"
-            - name: NVIDIA_DRIVER_CAPABILITIES
-              value: "compute,utility,video"
+              value: "opencv"
             - name: CPU_THREADS
               value: "1"
             - name: WORKER_PROCESSES

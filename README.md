@@ -49,13 +49,88 @@ Both raw YOLOv8 detection output (`[batch, 84, anchors]`) and end-to-end YOLO26 
 
 `CPU_THREADS` limits the OpenBLAS, OpenMP, NumExpr, PyTorch, and OpenCV thread pools in each worker. Keep it at `1` when running multiple worker processes against Triton to prevent CPU oversubscription.
 
+`TRITON_HTTP_COMPRESSION` optionally enables lossless HTTP request and response compression for the custom Triton detection predictor and remote ReID client. Values are `none` (default), `gzip`, or `deflate`. Set it to `gzip` for a bandwidth-constrained connection and restart the worker. It adds CPU compression work; leave it disabled on fast in-cluster links unless a benchmark shows a benefit. This option does not change tensors, confidence thresholds, or models, and does not apply to the standard segmentation predictor or gRPC.
+
+At 512x512, a single FP32 detector input is 3 MiB before compression, plus detection outputs and any appearance crops. A remote development machine can therefore be transfer-bound even when server GPU inference takes only milliseconds. Prefer running CPU workers in the Triton cluster or on a fast LAN. `TIME_VERBOSE=True` reports the total detection/ReID/tracking time, detector client-call time, and ReID HTTP request counts/time separately. The client-call times include transfer and server work, not just GPU time, and are already included in the total. No detections means ReID may legitimately make zero requests. Server inference statistics can include other workers' traffic.
+
 Triton runs the model forward pass, while video download, H.264 decoding, image preprocessing, tracking, and result postprocessing remain in the worker. The worker grabs every compressed frame required by the codec but only converts frames selected by `CLASSIFICATION_FPS` into images. Keyframe-only decoding is not used because keyframe cadence is source-dependent and is often too sparse for reliable tracking.
 
-`TRACKER_CONFIG` defaults to `bytetrack.yaml`, which avoids the image-based global-motion compensation used by BoT-SORT and substantially reduces worker CPU. Set it to `botsort.yaml` only when camera-motion compensation is required. The deployment default is `CLASSIFICATION_FPS=2`; increasing it improves temporal coverage but proportionally increases frame retrieval, Triton requests, tracking, and postprocessing.
+`TRACKER_CONFIG` defaults to `bytetrack.yaml`, which avoids the image-based global-motion compensation used by BoT-SORT and substantially reduces worker CPU. Set it to `botsort.yaml` when camera-motion compensation is required without appearance matching. These two filenames resolve to project-owned presets in `trackers/`, preserving the previous high-confidence threshold (0.5), new-track threshold (0.6), and lost-track buffer (30) after the Ultralytics upgrade. Other filenames are passed through as custom tracker configurations. The deployment default is `CLASSIFICATION_FPS=2`; increasing it improves temporal coverage but proportionally increases frame retrieval, Triton requests, tracking, and postprocessing.
 
 `VIDEO_DECODER=auto` uses FFmpeg NVDEC when a CUDA video device is available and falls back to OpenCV software decoding otherwise. The NVDEC path selects frames on the GPU before transferring BGR images to the worker. The container needs `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` and an `nvidia.com/gpu` allocation. Set `VIDEO_DECODER=nvdec` to fail instead of falling back, or `VIDEO_DECODER=opencv` to force software decoding.
 
-The container starts `WORKER_PROCESSES` independent queue consumers. Kubernetes configures five workers in one pod so they share one GPU allocation for NVDEC. Worker-specific output paths prevent concurrent downloads and generated files from colliding.
+The container starts `WORKER_PROCESSES` independent queue consumers. The Kubernetes configuration uses five CPU-only workers, OpenCV decoding, and remote Triton inference for both detection and appearance embeddings. It does not request a worker GPU. Worker-specific output paths prevent concurrent downloads and generated files from colliding.
+
+### Optional Appearance-Assisted Tracking
+
+Keep the existing detector and enable BoT-SORT appearance matching (ReID) to help maintain IDs through crossings and short occlusions:
+
+```dotenv
+TRACKER_REID_ENABLED="True"
+TRACKER_REID_BACKEND="triton"
+TRITON_REID_URL="http://10.0.1.24:30314/yolo11n_reid"
+TRITON_REID_IMAGE_SIZE="224"
+TRITON_REID_BATCH_SIZE="16"
+TRITON_REID_TIMEOUT="10"
+TRACKER_REID_MODEL="yolo11n-cls.pt"
+TRACKER_PROXIMITY_THRESH="0.5"
+TRACKER_APPEARANCE_THRESH="0.8"
+TRACKER_BUFFER="30"
+TRACKER_GMC_METHOD="none"
+```
+
+ReID is **disabled by default** in the application and Docker image. The Kubernetes manifest explicitly enables remote ReID using the in-cluster URL `http://triton.triton.svc.cluster.local:8000/yolo11n_reid`. Use the NodePort URL above when connecting from outside the cluster. When enabled, these settings select a generated BoT-SORT configuration **instead of `TRACKER_CONFIG`**. When disabled, `TRACKER_CONFIG` remains in control; a custom YAML can still explicitly enable ReID. Restart workers after changing tracking settings.
+
+| Variable | Default | Meaning in the opt-in mode |
+| --- | --- | --- |
+| `TRACKER_REID_ENABLED` | `False` | Select BoT-SORT with appearance matching; accepts `True` or `False`, case-insensitively. |
+| `TRACKER_REID_BACKEND` | `local` | `local` runs the encoder in the worker; `triton` sends object crops to the remote encoder without loading local weights. |
+| `TRITON_REID_URL` | empty | Required in remote mode: `http(s)://host:port/model-name`, not a `/v2/models/...` route. |
+| `TRITON_REID_IMAGE_SIZE` | `224` | Square input size; must match the deployed embedding model. |
+| `TRITON_REID_BATCH_SIZE` | `16` | Maximum crops per request; must not exceed the deployed model's maximum batch size. |
+| `TRITON_REID_TIMEOUT` | `10` | Positive connection and network timeout in seconds. Requests are synchronous. |
+| `TRACKER_REID_MODEL` | `yolo11n-cls.pt` | Local-mode encoder name or path; ignored in remote mode. `auto` is rejected in the generated local configuration. |
+| `TRACKER_PROXIMITY_THRESH` | `0.5` | Minimum predicted-box IoU before appearance can assist a match. Lower values admit larger motion between sampled frames but increase ambiguity. |
+| `TRACKER_APPEARANCE_THRESH` | `0.8` | Appearance similarity threshold; higher values make appearance-assisted matches stricter. Motion-based matching remains available. |
+| `TRACKER_BUFFER` | `30` | Lost-track lifetime in tracker updates, not original video frames. At approximately 2 sampled FPS, 30 updates represent approximately 15 seconds. A longer buffer can also cause incorrect reconnections. |
+| `TRACKER_GMC_METHOD` | `none` | Camera-motion compensation: `none`, `sparseOptFlow`, `orb`, `sift`, or `ecc`. Keep `none` for fixed cameras to avoid that processing cost. |
+
+With `TRACKER_REID_BACKEND=triton`, both neural networks run on the Triton server. The worker performs CPU crop preprocessing, HTTP requests, and BoT-SORT association. Remote failures propagate to the worker's existing message error handling; there is no fallback that downloads or runs local ReID weights. Tracking callbacks persist across frames and are reused when the detector predictor is recreated after a failure.
+
+With `TRACKER_REID_BACKEND=local`, the appearance encoder runs in each worker and uses Ultralytics' automatic device selection. Official weights may be downloaded on first use. Pre-provision local weights for offline/multi-worker use. `yolo11n-cls.pt` provides general classification features, not a specialized person/vehicle identity model; evaluate a suitable encoder for your footage.
+
+This requires the updated dependencies (`ultralytics==8.3.203` and `lap==0.5.12`): rebuild the container or reinstall `requirements.txt`. The older pinned Ultralytics version did not implement BoT-SORT ReID. Detector confidence, resolution, frame sampling, and result filtering are not changed by this switch. Named dominant colors from `FIND_DOMINANT_COLORS` remain output metadata and are not used for association.
+
+Appearance is combined with motion/overlap constraints; it does not guarantee recovery through complete occlusion or distinguish visually identical objects. This integration uses the library's feature smoothing, without a custom occlusion-aware feature-update policy. Track and appearance history reset between video messages; this is not cross-recording re-identification.
+
+Validate on representative crossing/occlusion clips using ID switches, missed/recovered tracks, and processing time. The automated tests exercise configuration, appearance-based association with controlled embeddings, real encoder execution with generated weights, ONNX export, resets, and Triton predictor callbacks, without measuring pretrained-model accuracy or contacting a Triton server. Install the export/test-only dependencies in addition to the worker requirements:
+
+```sh
+python -m pip install -r requirements-export.txt
+python -B -m unittest discover -s tests -v
+```
+
+#### Triton Model Deployment
+
+The remote encoder contract is `images`: FP32 `[batch, 3, 224, 224]`, RGB values in `[0, 1]`, and `embeddings`: FP32 `[batch, 256]`. Crops are clipped to the frame, resized directly to a square, and sent in bounded batches. The client validates and L2-normalizes returned embeddings. Do not deploy the unmodified classification output: class probabilities are not appearance embeddings.
+
+Export a dedicated model repository on a machine with the worker and export dependencies installed:
+
+```sh
+python -B -m scripts.export_triton_reid --weights yolo11n-cls.pt --repository ./triton-export
+```
+
+This exports the pooled classification backbone with a dynamic batch axis and writes `yolo11n_reid/1/model.onnx` and `yolo11n_reid/config.pbtxt`. The model config uses ONNX Runtime on Triton's GPU 0 with a maximum batch size of 16. The exporter numerically compares ONNX and PyTorch outputs for batches 1 and 16 and refuses to overwrite an existing model directory. Export dependencies are not needed in the worker container.
+
+For the current server, SSH access is `gpu1@10.0.1.24`; MicroK8s runs Triton in namespace `triton`. The host directory `/home/gpu1/triton-model-repository` is mounted as `/models`. Stage a complete export outside that directory, then move the new model directory into it using an authorized server account. Triton polls for new models every 60 seconds; no detector restart or replacement is necessary. Root-owned repository writes may require interactive sudo in your SSH session.
+
+`yolo11n_reid` version 1 was installed on this server and verified on 2026-09-17: readiness HTTP 200, GPU instance placement, and a live request returning two finite, normalized 256-dimensional embeddings. Recheck at any time from the workspace:
+
+```sh
+python -B -m scripts.check_triton_reid --url http://10.0.1.24:30314/yolo11n_reid
+```
+
+The classifier worker rollout is separate from this model deployment. Rebuild/publish the classifier image with these changes, set the image reference in `k8s-deployment.yaml` to that new image, and roll out the worker deployment. The existing `v1.5.5` image reference has not been rebuilt or deployed by this change. Do not apply the manifest to the old image expecting remote ReID support. The new manifest preserves the detector endpoint and thresholds while removing the worker GPU allocation and selecting `VIDEO_DECODER=opencv`.
 
 ### Queue Message Reader
 
